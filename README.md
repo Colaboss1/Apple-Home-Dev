@@ -39,6 +39,7 @@ Using the default Overview instead: You can replace the Overview dashboard the s
 - Context‑aware naming (removes redundant area names from accessory labels)
 - Clean navigation with iOS‑style header & back transitions
 - Camera tiles show latest snapshot & open live view (simple and Apple‑like)
+- **NEW: Native iPad Mode** with floating exact-replica sidebar, heavy glass effect, and dynamic layouts
 - Responsive adaptive grid (mobile, tablet, desktop) following Apple spacing feel
 - Readable in light or dark (neutral inactive surface, bright active surfaces)
 - RTL & multi‑language aware (mirrors layout & chevrons)
@@ -83,7 +84,14 @@ No manual YAML card definitions required.
 **Switch handling:** Regular switches are excluded by default (to avoid clutter from technical / helper switches). Outlets (device_class=outlet) are always shown. You can enable all switches or selectively add specific ones via customization.
 
 ---
-## 🆕 Recent Improvements (v1.1.2 & v1.1.1)
+## 🆕 Recent Improvements
+
+### v1.3.0 - The iPad Mode Update
+- **iPad Parity:** Introduced a brand-new true-to-Apple iPad mode. Complete with a heavy liquid-glass floating sidebar, dynamic room loading, and layout shifting. Top navigation is centralized with seamless hide/reveal mechanics.
+- **Mobile View Toggle:** New explicit view toggles inside the drop-down menu let you quickly force pure Mobile layout or iPad layout globally.
+- **Refined Liquid Glass:** The blur, saturation, and scaling animations of interface elements have been retuned to closer match iOS 18/iPadOS interaction feedback.
+
+### v1.1.2 & v1.1.1
 
 ### Automatic Dashboard Updates
 - Dashboard now automatically adapts to changes without requiring page refresh
@@ -262,6 +270,8 @@ strategy:
 | Switch / Outlet Inclusion | Global logic | Auto | Outlets always shown; other switches configurable (global setting planned) |
 | Background Style | Home view | Yes | (Background presets support – configurable) |
 | Hide Header / Sidebar | UI preference | Yes | Optional minimal mode |
+| Mobile View | Setting menu | Yes | Forces mobile portrait-like centralized layout |
+| iPad Mode | Setting menu | Yes | Activates true iPad interface with sliding heavy-blur sidebar |
 
 No YAML needed for any of the above.
 
@@ -278,8 +288,8 @@ No YAML needed for any of the above.
 - Favor short entity names; area name removal keeps things tidy
 - Use Edit Mode after first load to fine‑tune top‑level order & favorites
 
-## 📱 Mobile Experience
-Optimized for narrow viewports: adaptive grid, comfortable touch targets, and condensed header.
+## 📱 Mobile & iPad Experience
+Optimized for narrow viewports and tablets. Switch between native adaptive grids, forced Mobile view, or the fully-fledged iPad Mode.
 
 ![Mobile View](assets/mobile_view.png)
 
