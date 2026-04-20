@@ -236,8 +236,8 @@ if (!customElements.get('apple-home-view')) {
 }
 
 // Register the strategy element with Home Assistant (required pattern)
-if (!customElements.get('ll-strategy-apple-home-strategy')) {
-  customElements.define('ll-strategy-apple-home-strategy', AppleHomeStrategy);
+if (!customElements.get('ll-strategy-dashboard-apple-home-strategy')) {
+  customElements.define('ll-strategy-dashboard-apple-home-strategy', AppleHomeStrategy);
 }
 
 // Register the strategy with Home Assistant cards list
