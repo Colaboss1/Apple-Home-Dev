@@ -525,6 +525,13 @@ export class AppleChips {
           min-height: var(--apple-chip-height, 32px);
           white-space: nowrap;
           position: relative; /* Ensure proper positioning during drag */
+          transform: scale(1);
+        }
+
+        .chip:active {
+          transform: scale(0.95);
+          opacity: 0.8;
+          transition: transform 0.1s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.1s cubic-bezier(0.4, 0, 0.2, 1);
         }
 
         /* RTL chips - swap left/right padding */

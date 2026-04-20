@@ -6,6 +6,10 @@ import { CardManager } from '../utils/CardManager';
 import { setupLocalize, localize } from '../utils/LocalizationService';
 import { AppleChips } from '../sections/AppleChips';
 import { ChipsConfigurationManager } from '../utils/ChipsConfigurationManager';
+import { BackgroundManager } from '../utils/BackgroundManager';
+import { HomeAssistantUIManager } from '../utils/HomeAssistantUIManager';
+import { SnapshotManager } from '../utils/SnapshotManager';
+import { AppleSidebar } from '../sections/AppleSidebar';
 import { HomePage } from '../pages/HomePage';
 import { GroupPage } from '../pages/GroupPage';
 import { RTLHelper } from '../utils/RTLHelper';
@@ -24,6 +28,7 @@ export class AppleHomeView extends HTMLElement {
   private _hass?: any;
   private _config?: any;
   private content?: HTMLElement;
+  private _isIpadMode = false;
   private _rendered = false;
   private _isTransitioning = false; // Add transition state
   private _lastRenderTime = 0; // Track when last render happened
@@ -32,6 +37,12 @@ export class AppleHomeView extends HTMLElement {
   private visibilityChangeHandler?: () => void; // Add visibility change handler
   private globalRefreshHandler?: (event: Event) => void; // Add global refresh handler
   private currentDashboardKey: string = 'default'; // Track current dashboard key
+  
+  // iPad Mode Properties
+  private sidebarElement?: AppleSidebar;
+  private isSidebarCollapsed: boolean = false;
+  private resizeObserver?: ResizeObserver;
+  private backgroundManager!: BackgroundManager;
   
   // Registry subscription handlers for automatic updates
   private registrySubscriptionManager?: RegistrySubscriptionManager;
@@ -85,6 +96,7 @@ export class AppleHomeView extends HTMLElement {
 
     // Initialize managers as instance-specific but use singleton for customization
     this.customizationManager = CustomizationManager.getInstance();
+    this.backgroundManager = new BackgroundManager(this.customizationManager);
     this.cardManager = new CardManager(this.customizationManager);
     this.editModeManager = new EditModeManager((editMode) => this.handleEditModeChange(editMode));
     
@@ -1751,12 +1763,39 @@ export class AppleHomeView extends HTMLElement {
           }
 
           :host(.is-mobile-view) {
-            background-color: #000 !important;
             display: flex !important;
             justify-content: center !important;
             padding: 0 !important;
             min-height: 100vh !important;
             overflow-x: hidden !important;
+          }
+
+          /* ============================================
+             IPAD MODE OVERRIDER
+             ============================================ */
+             
+          :host(.is-ipad-mode) {
+            display: flex !important;
+            justify-content: flex-start !important;
+            padding: 0 !important;
+            min-height: 100vh !important;
+            overflow-x: hidden !important;
+          }
+
+          :host(.is-ipad-mode) .wrapper-content {
+            margin-left: 320px !important; /* Make room for sidebar */
+            max-width: calc(100% - 320px) !important;
+            width: 100% !important;
+            min-height: 100vh;
+            padding: 30px 40px !important;
+            position: relative;
+            box-sizing: border-box;
+            transition: margin-left 0.4s cubic-bezier(0.2, 0.8, 0.2, 1), max-width 0.4s cubic-bezier(0.2, 0.8, 0.2, 1);
+          }
+          
+          :host(.is-ipad-mode.sidebar-collapsed) .wrapper-content {
+            margin-left: 0 !important;
+            max-width: 100% !important;
           }
 
           :host(.is-mobile-view) .wrapper-content {
@@ -1766,10 +1805,8 @@ export class AppleHomeView extends HTMLElement {
             min-height: 100vh;
             padding-bottom: 120px !important; /* Space for bottom bar */
             position: relative;
-            background: rgba(0,0,0,0.4);
-            box-shadow: 0 0 100px rgba(0,0,0,0.8);
-            border-left: 1px solid rgba(255,255,255,0.1);
-            border-right: 1px solid rgba(255,255,255,0.1);
+            border-left: 1px solid rgba(255,255,255,0.05); /* Softer border */
+            border-right: 1px solid rgba(255,255,255,0.05);
           }
 
           :host(.is-mobile-view) .apple-home-header.group-page {
@@ -1785,11 +1822,6 @@ export class AppleHomeView extends HTMLElement {
             margin-right: 0 !important;
           }
 
-          @keyframes slideUpGlassBar {
-            0% { transform: translate(-50%, 120px) scale(0.95); opacity: 0; }
-            100% { transform: translate(-50%, 0) scale(1); opacity: 1; }
-          }
-
           .bottom-indicator-bar {
             position: fixed;
             bottom: 34px;
@@ -1797,7 +1829,7 @@ export class AppleHomeView extends HTMLElement {
             transform: translateX(-50%);
             width: fit-content;
             height: 64px;
-            background: rgba(40, 40, 40, 0.65);
+            background: rgba(255, 255, 255, 0.25);
             backdrop-filter: blur(30px) saturate(1.8);
             -webkit-backdrop-filter: blur(30px) saturate(1.8);
             border-radius: 35px;
@@ -1806,10 +1838,9 @@ export class AppleHomeView extends HTMLElement {
             padding: 0 8px;
             gap: 4px;
             z-index: 10000;
-            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4), inset 0 0 0 1px rgba(255, 255, 255, 0.1);
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15), inset 0 0 0 1px rgba(255, 255, 255, 0.4);
             transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-            border: 0.5px solid rgba(255, 255, 255, 0.05);
-            animation: slideUpGlassBar 0.5s cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+            border: 0.5px solid rgba(255, 255, 255, 0.2);
           }
 
           .bottom-bar-item {
@@ -1820,7 +1851,7 @@ export class AppleHomeView extends HTMLElement {
              padding: 0 24px;
              height: 52px;
              border-radius: 30px;
-             color: rgba(255, 255, 255, 0.5);
+             color: rgba(0, 0, 0, 0.6);
              transition: all 0.25s ease;
              cursor: pointer;
              gap: 2px;
@@ -1828,9 +1859,9 @@ export class AppleHomeView extends HTMLElement {
           }
 
           .bottom-bar-item.active {
-             background: rgba(255, 255, 255, 0.15);
-             color: #fff;
-             box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1);
+             background: rgba(255, 255, 255, 0.6);
+             color: #000;
+             box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.4), 0 2px 10px rgba(0,0,0,0.05);
           }
 
           .bottom-bar-item ha-icon {
@@ -1859,12 +1890,59 @@ export class AppleHomeView extends HTMLElement {
           </div>
           <div class="bottom-indicator-bar-container"></div>
         </div>
+        <div class="sidebar-container" style="display: none;"></div>
       `;
     }
     
-    // Update mobile view class and bottom bar
+    // Handle Background first
     const isMobileView = this.customizationManager.isMobileViewActive();
-    this.classList.toggle('is-mobile-view', isMobileView);
+    const isIpadMode = this.customizationManager.isIpadModeActive();
+    this.backgroundManager.applyBackgroundOnly(this.backgroundManager.getCurrentBackground());
+    
+    // Apply layout classes to host
+    if (isMobileView) {
+      this.classList.add('is-mobile-view');
+      this.classList.remove('is-ipad-mode');
+    } else if (isIpadMode) {
+      this.classList.add('is-ipad-mode');
+      this.classList.remove('is-mobile-view');
+    } else {
+      this.classList.remove('is-mobile-view', 'is-ipad-mode');
+    }
+    
+    // ==========================================
+    // IPAD MODE RENDERING
+    // ==========================================
+    if (isIpadMode) {
+      const sidebarContainer = this.shadowRoot!.querySelector('.sidebar-container') as HTMLElement;
+      if (sidebarContainer) {
+        sidebarContainer.style.display = 'block';
+        
+        // Initialize Sidebar if not created
+        if (!this.sidebarElement) {
+          this.sidebarElement = new AppleSidebar(sidebarContainer);
+          this.sidebarElement.setOnClose(() => {
+            this.isSidebarCollapsed = !this.isSidebarCollapsed;
+            this.classList.toggle('sidebar-collapsed', this.isSidebarCollapsed);
+            
+            // Also notify header to show the top tabs
+            this.dispatchEvent(new CustomEvent('sidebar-toggled', {
+              bubbles: true,
+              composed: true,
+              detail: { collapsed: this.isSidebarCollapsed }
+            }));
+          });
+        }
+        
+        // Update hass reference
+        this.sidebarElement.hass = this._hass;
+      }
+    } else {
+      const sidebarContainer = this.shadowRoot!.querySelector('.sidebar-container') as HTMLElement;
+      if (sidebarContainer) {
+        sidebarContainer.style.display = 'none';
+      }
+    }
     
     if (isMobileView) {
       const barContainer = this.shadowRoot!.querySelector('.bottom-indicator-bar-container');
@@ -1872,47 +1950,61 @@ export class AppleHomeView extends HTMLElement {
         const pageType = this.config?.pageType;
         const isAutomationPage = pageType === 'scenes' || pageType === 'cameras';
         
-        barContainer.innerHTML = `
-          <div class="bottom-indicator-bar">
-            <div class="bottom-bar-item home-tab ${!isAutomationPage ? 'active' : ''}" id="nav-home">
-              <ha-icon icon="mdi:home-variant"></ha-icon>
-              <span>${localize('ui_actions.home')}</span>
+        // Only create HTML and attach listeners if it doesn't exist yet
+        // This prevents the animation from re-triggering constantly on state updates
+        if (!barContainer.querySelector('.bottom-indicator-bar')) {
+          barContainer.innerHTML = `
+            <div class="bottom-indicator-bar">
+              <div class="bottom-bar-item home-tab ${!isAutomationPage ? 'active' : ''}" id="nav-home">
+                <ha-icon icon="mdi:home-variant"></ha-icon>
+                <span>${localize('ui_actions.home')}</span>
+              </div>
+              <div class="bottom-bar-item automation-tab ${isAutomationPage ? 'active' : ''}" id="nav-automation">
+                <ha-icon icon="mdi:clock-star-four-points"></ha-icon>
+                <span>${localize('ui_actions.automation')}</span>
+              </div>
             </div>
-            <div class="bottom-bar-item automation-tab ${isAutomationPage ? 'active' : ''}" id="nav-automation">
-              <ha-icon icon="mdi:clock-outline"></ha-icon>
-              <span>${localize('ui_actions.automation')}</span>
-            </div>
-          </div>
-        `;
-        
-        // Add listeners
-        const getBasePath = () => {
-          const path = window.location.pathname;
-          // Standard HA path
-          if (path.startsWith('/lovelace/')) return '/lovelace/';
-          // Custom dashboard path
-          const parts = path.split('/').filter(p => p.length > 0);
-          return parts.length > 0 ? `/${parts[0]}/` : '/lovelace/';
-        };
+          `;
+          
+          // Add listeners
+          const getBasePath = () => {
+            const path = window.location.pathname;
+            // Standard HA path
+            if (path.startsWith('/lovelace/')) return '/lovelace/';
+            // Custom dashboard path
+            const parts = path.split('/').filter(p => p.length > 0);
+            return parts.length > 0 ? `/${parts[0]}/` : '/lovelace/';
+          };
 
-        barContainer.querySelector('#nav-home')?.addEventListener('click', (e) => {
-          e.preventDefault();
-          const newUrl = getBasePath() + 'home';
-          if (window.location.pathname !== newUrl) {
-            window.history.pushState(null, '', newUrl);
-            window.dispatchEvent(new Event('location-changed', { bubbles: true, composed: true }));
+          barContainer.querySelector('#nav-home')?.addEventListener('click', (e) => {
+            e.preventDefault();
+            const newUrl = getBasePath() + 'home';
+            if (window.location.pathname !== newUrl) {
+              window.history.pushState(null, '', newUrl);
+              window.dispatchEvent(new Event('location-changed', { bubbles: true, composed: true }));
+            }
+          });
+          
+          barContainer.querySelector('#nav-automation')?.addEventListener('click', (e) => {
+            e.preventDefault();
+            const newUrl = getBasePath() + 'scenes';
+            if (window.location.pathname !== newUrl) {
+              window.history.pushState(null, '', newUrl);
+              window.dispatchEvent(new Event('location-changed', { bubbles: true, composed: true }));
+            }
+          });
+        } else {
+          // If structure exists, just update active states
+          const homeTab = barContainer.querySelector('#nav-home');
+          const automationTab = barContainer.querySelector('#nav-automation');
+          if (isAutomationPage) {
+            homeTab?.classList.remove('active');
+            automationTab?.classList.add('active');
+          } else {
+            homeTab?.classList.add('active');
+            automationTab?.classList.remove('active');
           }
-        });
-        
-        barContainer.querySelector('#nav-automation')?.addEventListener('click', (e) => {
-          e.preventDefault();
-          // Automation logic: Try scenes first as it's the closest thing to an automation tab in this dashboard
-          const newUrl = getBasePath() + 'scenes';
-          if (window.location.pathname !== newUrl) {
-            window.history.pushState(null, '', newUrl);
-            window.dispatchEvent(new Event('location-changed', { bubbles: true, composed: true }));
-          }
-        });
+        }
       }
     } else {
       const barContainer = this.shadowRoot!.querySelector('.bottom-indicator-bar-container');

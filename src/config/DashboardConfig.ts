@@ -415,14 +415,14 @@ export class DashboardConfig {
   private static getFallbackIcon(domain: string, entityState: string, attributes: any, entityId?: string): string {
     switch (domain) {
       case 'light':
-        return 'mdi:lightbulb';
+        return 'mdi:lightbulb-outline';
       case 'switch':
         // Special handling for outlets
         if (entityId && this.isOutlet(entityId, attributes)) {
-          return 'mdi:power-socket';
+          return 'mdi:power-plug-outline';
         }
         // Fallback for other switches (though they should be hidden)
-        return 'mdi:light-switch';
+        return 'mdi:toggle-switch-outline';
       case 'cover':
         // Special handling for garage doors and gates
         if (entityId && this.isGarageDoorOrGate(entityId, attributes)) {
@@ -452,7 +452,7 @@ export class DashboardConfig {
       case 'media_player':
         return this.getMediaPlayerIcon(entityState, attributes);
       case 'lock':
-        return entityState === 'unlocked' ? 'mdi:lock-open' : 'mdi:lock';
+        return entityState === 'unlocked' ? 'mdi:lock-open-outline' : 'mdi:lock-outline';
       case 'alarm_control_panel':
         return 'mdi:alarm-light';
       case 'button':

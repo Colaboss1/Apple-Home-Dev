@@ -66,7 +66,12 @@ export class CustomizationManager {
       return {
         home: {},
         pages: {},
-        ui: {},
+        ui: {
+          hide_header: false,
+          hide_sidebar: false,
+          mobile_view: false,
+          ipad_mode: false
+        },
         background: {}
       };
     }
@@ -99,7 +104,8 @@ export class CustomizationManager {
       ui: {
         hide_header: oldCustomizations.ui?.hideHeader || oldCustomizations.ui?.hide_header || false,
         hide_sidebar: oldCustomizations.ui?.hideSidebar || oldCustomizations.ui?.hide_sidebar || false,
-        mobile_view: oldCustomizations.ui?.mobile_view || false
+        mobile_view: oldCustomizations.ui?.mobile_view || false,
+        ipad_mode: oldCustomizations.ui?.ipad_mode || false
       },
       background: oldCustomizations.background || { type: 'preset', value: 'default' }
     };
@@ -735,6 +741,11 @@ export class CustomizationManager {
     return uiSettings.mobile_view === true;
   }
 
+  isIpadModeActive(): boolean {
+    const uiSettings = this.getUISettings();
+    return uiSettings.ipad_mode === true;
+  }
+
   async setHeaderVisibility(hidden: boolean): Promise<void> {
     await this.ensureCustomizationsLoaded();
     const uiSettings = this.getUISettings();
@@ -755,6 +766,14 @@ export class CustomizationManager {
     await this.ensureCustomizationsLoaded();
     const uiSettings = this.getUISettings();
     uiSettings.mobile_view = active;
+    this.setUISettings(uiSettings);
+    await this.saveCustomizations();
+  }
+
+  async setIpadModeActive(active: boolean): Promise<void> {
+    await this.ensureCustomizationsLoaded();
+    const uiSettings = this.getUISettings();
+    uiSettings.ipad_mode = active;
     this.setUISettings(uiSettings);
     await this.saveCustomizations();
   }

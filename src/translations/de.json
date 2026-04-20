@@ -137,7 +137,8 @@
     "home_settings": "Hauseinstellungen",
     "reorder_sections": "Bereiche Neu Anordnen",
     "choose_wallpaper": "Hintergrundbild Wählen",
-    "mobile_view": "Handy-Version",
+    "mobile_view": "Handy Modus",
+    "ipad_mode": "iPad Modus",
     "automation": "Automation"
   },
   "wallpaper_presets": {

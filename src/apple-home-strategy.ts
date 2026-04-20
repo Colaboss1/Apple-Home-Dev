@@ -12,6 +12,7 @@
 import { DashboardConfig, DeviceGroup } from './config/DashboardConfig';
 import { AppleHomeCard } from './components/AppleHomeCard';
 import { AppleHomeView } from './components/AppleHomeView';
+import './components/AppleHomePopup';
 import { CustomizationManager } from './utils/CustomizationManager';
 import { setupLocalize, localize } from './utils/LocalizationService';
 import { BackgroundManager } from './utils/BackgroundManager';

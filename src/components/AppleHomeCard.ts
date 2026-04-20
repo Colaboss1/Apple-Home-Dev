@@ -1069,12 +1069,20 @@ export class AppleHomeCard extends HTMLElement {
       return;
     }
     
-    // Open more-info dialog for card area clicks
-    this.dispatchEvent(new CustomEvent('hass-more-info', {
-      bubbles: true,
-      composed: true,
-      detail: { entityId: this.entity }
-    }));
+    const allowedPopupDomains = ['light', 'cover', 'climate', 'water_heater', 'media_player'];
+    if (this.domain && allowedPopupDomains.includes(this.domain)) {
+      // Open our shiny new Apple popup!
+      const popup = document.createElement('apple-home-popup') as any;
+      document.body.appendChild(popup);
+      popup.setup(this._hass, this.entity);
+    } else {
+      // Open standard more-info dialog for all other domains
+      this.dispatchEvent(new CustomEvent('hass-more-info', {
+        bubbles: true,
+        composed: true,
+        detail: { entityId: this.entity }
+      }));
+    }
   }
 
   private handleIconClick(event: Event) {

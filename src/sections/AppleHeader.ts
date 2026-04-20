@@ -419,6 +419,14 @@ export class AppleHeader {
               ${this.getDropdownContent()}
             </div>
           ` : ''}
+          <div class="apple-ipad-top-nav">
+             <div class="ipad-nav-item active"><ha-icon icon="mdi:home-variant-outline"></ha-icon><span>${localize('pages.my_home') || 'Zuhause'}</span></div>
+             <div class="ipad-nav-item"><ha-icon icon="mdi:clock-star-four-points"></ha-icon><span>${localize('ui_actions.automation') || 'Automation'}</span></div>
+             <div class="ipad-nav-item"><ha-icon icon="mdi:star-outline"></ha-icon><span>Entdecken</span></div>
+          </div>
+          <button class="apple-header-sidebar-open-btn ${LiquidGlassClasses.headerButton}">
+             <ha-icon icon="${RTLHelper.isRTL() ? 'mdi:dock-left' : 'mdi:dock-right'}"></ha-icon>
+          </button>
         </div>
       `;
 
@@ -478,6 +486,14 @@ export class AppleHeader {
                 ${this.getDropdownContent()}
               </div>
             ` : ''}
+            <div class="apple-ipad-top-nav">
+               <div class="ipad-nav-item active"><ha-icon icon="mdi:home-variant-outline"></ha-icon><span>${localize('pages.my_home') || 'Zuhause'}</span></div>
+               <div class="ipad-nav-item"><ha-icon icon="mdi:clock-star-four-points"></ha-icon><span>${localize('ui_actions.automation') || 'Automation'}</span></div>
+               <div class="ipad-nav-item"><ha-icon icon="mdi:star-outline"></ha-icon><span>Entdecken</span></div>
+            </div>
+            <button class="apple-header-sidebar-open-btn ${LiquidGlassClasses.headerButton}">
+               <ha-icon icon="${RTLHelper.isRTL() ? 'mdi:dock-left' : 'mdi:dock-right'}"></ha-icon>
+            </button>
           </div>
         </div>
       `;
@@ -612,10 +628,15 @@ export class AppleHeader {
         <ha-icon icon="mdi:page-layout-header"></ha-icon>
         <span>${this.uiManager.getHeaderToggleText()}</span>
       </div>
-      <div class="dropdown-item settings-item mobile-view-toggle">
+      <div class="dropdown-item settings-item mobile-view-toggle" data-action="mobile-view">
         <span class="item-checkmark">${this.customizationManager?.isMobileViewActive() ? '<ha-icon icon="mdi:check"></ha-icon>' : ''}</span>
         <ha-icon icon="mdi:cellphone"></ha-icon>
         <span>${localize('ui_actions.mobile_view')}</span>
+      </div>
+      <div class="dropdown-item settings-item ipad-mode-toggle" data-action="ipad-mode">
+        <span class="item-checkmark">${this.customizationManager?.isIpadModeActive() ? '<ha-icon icon="mdi:check"></ha-icon>' : ''}</span>
+        <ha-icon icon="mdi:tablet-ipad"></ha-icon>
+        <span>${localize('ui_actions.ipad_mode') || 'iPad Modus'}</span>
       </div>${sidebarSection}${roomsSection}
     `;
   }
@@ -770,6 +791,19 @@ export class AppleHeader {
       });
     }
 
+    // IPAD Sidebar open button click
+    const ipadSidebarOpenBtn = this.headerElement?.querySelector('.apple-header-sidebar-open-btn') as HTMLButtonElement;
+    if (ipadSidebarOpenBtn) {
+      ipadSidebarOpenBtn.addEventListener('click', (e: Event) => {
+        e.stopPropagation();
+        // Since iPad mode injects an actual separate sidebar UI, we should decouple this from the HA-native sidebar overlay logic if needed,
+        // but for now the sidebar overlay logic is tied to "toggle sidebar UI".
+        // Wait, the "isSidebarCollapsed" is handled on AppleHomeView. Let's dispatch a custom event.
+        const event = new CustomEvent('apple-sidebar-toggled', { detail: { open: true }, bubbles: true, composed: true });
+        this.container?.dispatchEvent(event);
+      });
+    }
+
     // Window resize listener to update button visibility based on mobile/desktop
     if (!this.resizeListener) {
       this.resizeListener = () => {
@@ -855,11 +889,25 @@ export class AppleHeader {
       this.closeDropdown();
     });
 
-    this.dropdown.querySelector('.mobile-view-toggle')?.addEventListener('click', (e: Event) => {
-      e.stopPropagation();
-      this.toggleMobileView();
-      this.closeDropdown();
-    });
+    // Mobile View Toggle
+    const mobileViewBtn = this.dropdown.querySelector('[data-action="mobile-view"]');
+    if (mobileViewBtn) {
+      mobileViewBtn.addEventListener('click', (e: Event) => {
+        e.stopPropagation();
+        this.toggleMobileView();
+        this.closeDropdown();
+      });
+    }
+
+    // iPad Mode Toggle
+    const ipadModeBtn = this.dropdown.querySelector('[data-action="ipad-mode"]');
+    if (ipadModeBtn) {
+      ipadModeBtn.addEventListener('click', (e: Event) => {
+        e.stopPropagation();
+        this.toggleIpadMode();
+        this.closeDropdown();
+      });
+    }
 
     // Room navigation items
     this.dropdown.querySelectorAll('.room-item').forEach((roomItem) => {
@@ -876,8 +924,29 @@ export class AppleHeader {
 
   private async toggleMobileView() {
     if (!this.customizationManager) return;
-    const isActive = this.customizationManager.isMobileViewActive();
-    await this.customizationManager.setMobileViewActive(!isActive);
+    
+    // Disable iPad mode if we're turning on Mobile mode
+    const isCurrentlyMobile = this.customizationManager.isMobileViewActive();
+    if (!isCurrentlyMobile) {
+      await this.customizationManager.setIpadModeActive(false);
+    }
+    
+    await this.customizationManager.setMobileViewActive(!isCurrentlyMobile);
+    
+    // Trigger a global refresh to update all components
+    this.customizationManager.triggerGlobalDashboardRefresh();
+  }
+
+  private async toggleIpadMode() {
+    if (!this.customizationManager) return;
+    
+    // Disable Mobile mode if we're turning on iPad mode
+    const isCurrentlyIpad = this.customizationManager.isIpadModeActive();
+    if (!isCurrentlyIpad) {
+      await this.customizationManager.setMobileViewActive(false);
+    }
+    
+    await this.customizationManager.setIpadModeActive(!isCurrentlyIpad);
     
     // Trigger a global refresh to update all components
     this.customizationManager.triggerGlobalDashboardRefresh();
@@ -1786,6 +1855,81 @@ export class AppleHeader {
         justify-content: center;
         padding: 12px var(--apple-page-padding, 22px);
         position: relative;
+      }
+
+      /* iPad Top Nav */
+      .apple-ipad-top-nav {
+        display: none;
+        position: absolute;
+        left: 50%;
+        top: 50%;
+        transform: translate(-50%, -50%);
+        background: rgba(40, 40, 40, 0.45);
+        backdrop-filter: blur(40px) saturate(1.8);
+        -webkit-backdrop-filter: blur(40px) saturate(1.8);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 12px;
+        padding: 4px;
+        z-index: 10;
+      }
+      
+      .apple-ipad-top-nav .ipad-nav-item {
+        padding: 6px 16px;
+        border-radius: 8px;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        cursor: pointer;
+        color: rgba(255,255,255,0.7);
+        font-size: 14px;
+        font-weight: 500;
+        transition: all 0.2s ease;
+      }
+      
+      .apple-ipad-top-nav .ipad-nav-item:hover {
+        background: rgba(255,255,255,0.05);
+      }
+      
+      .apple-ipad-top-nav .ipad-nav-item.active {
+        background: rgba(255,255,255,0.15);
+        color: white;
+      }
+      
+      .apple-ipad-top-nav ha-icon {
+        --mdc-icon-size: 18px;
+      }
+
+      .apple-header-sidebar-open-btn {
+        display: none;
+        position: absolute;
+        right: 60px; /* Offset from menu button */
+        top: 50%;
+        transform: translateY(-50%);
+        z-index: 10;
+      }
+      
+      .apple-header-sidebar-open-btn:active {
+        transform: translateY(-50%) scale(0.95);
+      }
+
+      .apple-header-sidebar-open-btn ha-icon {
+        --mdc-icon-size: 22px;
+        position: relative;
+        z-index: 2;
+      }
+      
+      /* Display iPad nav only when sidebar collapsed and in iPad mode */
+      apple-home-view.is-ipad-mode.sidebar-collapsed .apple-ipad-top-nav {
+         display: flex;
+      }
+      
+      apple-home-view.is-ipad-mode.sidebar-collapsed .apple-header-sidebar-open-btn {
+         display: flex;
+      }
+
+      /* When NOT collapsed, ensure standard sidebar buttons are still hidden inside iPad mode */
+      apple-home-view.is-ipad-mode .apple-header-sidebar-button {
+         display: none !important;
       }
 
       /* Back button - positioning only (glass effect from .liquid-glass-transparent) */
