@@ -58,10 +58,9 @@
   },
   "homepage": "https://github.com/nitaybz/apple-home-dashboard#readme",
   "files": [
-    "dist/",
+    "apple-home-dashboard.js",
     "src/",
     "hacs.json",
-    "webpack.config.ts",
     "package.json",
     "README.md"
   ],
