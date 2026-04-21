@@ -635,7 +635,7 @@ export class AppleHeader {
       </div>
       <div class="dropdown-item settings-item ipad-mode-toggle" data-action="ipad-mode">
         <span class="item-checkmark">${this.customizationManager?.isIpadModeActive() ? '<ha-icon icon="mdi:check"></ha-icon>' : ''}</span>
-        <ha-icon icon="mdi:tablet-ipad"></ha-icon>
+        <ha-icon icon="mdi:tablet-dashboard"></ha-icon>
         <span>${localize('ui_actions.ipad_mode') || 'iPad Modus'}</span>
       </div>${sidebarSection}${roomsSection}
     `;
@@ -796,13 +796,38 @@ export class AppleHeader {
     if (ipadSidebarOpenBtn) {
       ipadSidebarOpenBtn.addEventListener('click', (e: Event) => {
         e.stopPropagation();
-        // Since iPad mode injects an actual separate sidebar UI, we should decouple this from the HA-native sidebar overlay logic if needed,
-        // but for now the sidebar overlay logic is tied to "toggle sidebar UI".
-        // Wait, the "isSidebarCollapsed" is handled on AppleHomeView. Let's dispatch a custom event.
-        const event = new CustomEvent('apple-sidebar-toggled', { detail: { open: true }, bubbles: true, composed: true });
+        // Dispatch toggle event - detail 'open' is omitted to signal a toggle
+        const event = new CustomEvent('apple-sidebar-toggled', { 
+          detail: { toggle: true }, 
+          bubbles: true, 
+          composed: true 
+        });
         this.container?.dispatchEvent(event);
       });
     }
+
+    // IPAD Top Navigation listeners
+    const ipadNavItems = this.headerElement?.querySelectorAll('.apple-ipad-top-nav .ipad-nav-item');
+    ipadNavItems?.forEach((item, index) => {
+      item.addEventListener('click', (e: Event) => {
+        e.stopPropagation();
+        // Remove active class from all
+        ipadNavItems.forEach(i => i.classList.remove('active'));
+        // Add active to current
+        item.classList.add('active');
+        
+        // Navigate based on index or text
+        const text = (item.querySelector('span')?.textContent || '').toLowerCase();
+        if (text.includes('zuhause') || text.includes('home')) {
+          this.navigateToHome();
+        } else if (text.includes('automation')) {
+          this.navigateToAutomation();
+        } else if (text.includes('entdecken') || text.includes('explore')) {
+          // No specialized page for 'Entdecken' yet, let's go to default or do nothing
+          console.log('Navigation to Explore not implemented yet');
+        }
+      });
+    });
 
     // Window resize listener to update button visibility based on mobile/desktop
     if (!this.resizeListener) {
@@ -853,6 +878,11 @@ export class AppleHeader {
       }
     };
     document.addEventListener('keydown', this.escapeKeyListener);
+
+    // Sidebar state change listener (reacts to logic in main view or sidebar itself)
+    document.addEventListener('apple-sidebar-state-changed', (e: Event) => {
+      this.updateSidebarButtonVisibility();
+    });
   }
 
   private setupDropdownItemListeners() {
@@ -1714,34 +1744,6 @@ export class AppleHeader {
     }
   }
 
-  private navigateToHome() {
-    const currentPath = window.location.pathname;
-    let basePath = '';
-
-    // Handle different dashboard URL patterns
-    if (currentPath.startsWith('/lovelace/')) {
-      basePath = '/lovelace/';
-    } else if (currentPath === '/lovelace') {
-      basePath = '/lovelace/';
-    } else {
-      // Custom dashboard: extract the dashboard name
-      const pathParts = currentPath.split('/').filter(part => part.length > 0);
-      if (pathParts.length > 0) {
-        basePath = `/${pathParts[0]}/`;
-      } else {
-        basePath = '/lovelace/';
-      }
-    }
-
-    // Navigate to home
-    const newUrl = `${basePath}home`;
-
-    // Navigate using Home Assistant's system
-    window.history.pushState(null, '', newUrl);
-    const event = new Event('location-changed', { bubbles: true, composed: true });
-    window.dispatchEvent(event);
-  }
-
   private navigateToRoom(roomId: string) {
     const currentPath = window.location.pathname;
     let basePath = '';
@@ -1864,9 +1866,9 @@ export class AppleHeader {
         left: 50%;
         top: 50%;
         transform: translate(-50%, -50%);
-        background: rgba(40, 40, 40, 0.45);
-        backdrop-filter: blur(40px) saturate(1.8);
-        -webkit-backdrop-filter: blur(40px) saturate(1.8);
+        background: rgba(40, 40, 40, 0.85);
+        backdrop-filter: blur(16px);
+        -webkit-backdrop-filter: blur(16px);
         border: 1px solid rgba(255, 255, 255, 0.1);
         border-radius: 12px;
         padding: 4px;
@@ -2207,9 +2209,9 @@ export class AppleHeader {
         overflow-x: hidden;
         scrollbar-width: none;
         -ms-overflow-style: none;
-        background: rgba(30, 30, 30, 0.75);
-        backdrop-filter: blur(50px) saturate(180%);
-        -webkit-backdrop-filter: blur(50px) saturate(180%);
+        background: rgba(28, 28, 30, 0.88);
+        backdrop-filter: blur(20px);
+        -webkit-backdrop-filter: blur(20px);
         border-radius: var(--apple-modal-radius, 20px);
         padding: 4px 0;
         opacity: 0;
@@ -2708,6 +2710,41 @@ export class AppleHeader {
     if (this.currentConfig.isGroupPage) {
       this.updateFixedHeaderPosition();
     }
+  }
+
+  /**
+   * Navigation helpers for iPad mode
+   */
+  private navigateToHome() {
+    this.navigateToPath('home');
+  }
+
+  private navigateToAutomation() {
+    // Navigate to HA automations page
+    window.history.pushState(null, '', '/config/automation');
+    window.dispatchEvent(new CustomEvent('location-changed'));
+  }
+
+  private navigateToPath(path: string) {
+    const currentPath = window.location.pathname;
+    let basePath = '';
+    
+    if (currentPath.startsWith('/lovelace/')) {
+      basePath = '/lovelace/';
+    } else {
+      const pathParts = currentPath.split('/').filter(part => part.length > 0);
+      if (pathParts.length > 0) {
+        basePath = `/${pathParts[0]}/`;
+      } else {
+        basePath = '/lovelace/';
+      }
+    }
+    
+    const cleanPath = path.startsWith('/') ? path.slice(1) : path;
+    const newUrl = `${basePath}${cleanPath}`;
+    
+    window.history.pushState(null, '', newUrl);
+    window.dispatchEvent(new CustomEvent('location-changed'));
   }
 
   destroy() {

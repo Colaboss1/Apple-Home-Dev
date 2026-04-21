@@ -513,8 +513,9 @@ export class AppleChips {
           padding: var(--apple-chip-padding, 3px 16px 3px 8px);
           border-radius: 50px;
           background: var(--chip-background-color);
-          backdrop-filter: blur(20px);
-          -webkit-backdrop-filter: blur(20px);
+          /* Performance: Removed blur from chips */
+          backdrop-filter: none;
+          -webkit-backdrop-filter: none;
           color: white;
           font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', Roboto, sans-serif;
           cursor: pointer;
@@ -551,8 +552,9 @@ export class AppleChips {
 
         .chip.active {
           background: var(--apple-chip-bg-active, rgba(255, 255, 255, 0.9)) !important;
-          backdrop-filter: blur(20px);
-          -webkit-backdrop-filter: blur(20px);
+          /* Performance: Removed blur from chips */
+          backdrop-filter: none;
+          -webkit-backdrop-filter: none;
         }
 
         .chip.active .chip-group-name {

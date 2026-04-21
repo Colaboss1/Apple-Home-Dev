@@ -42,6 +42,7 @@ export class AppleHomeView extends HTMLElement {
   private sidebarElement?: AppleSidebar;
   private isSidebarCollapsed: boolean = false;
   private resizeObserver?: ResizeObserver;
+  private sidebarToggleHandler?: (e: Event) => void;
   private backgroundManager!: BackgroundManager;
   
   // Registry subscription handlers for automatic updates
@@ -146,6 +147,33 @@ export class AppleHomeView extends HTMLElement {
     };
     document.addEventListener('apple-home-dashboard-refresh', this.globalRefreshHandler);
     
+    // Listen for sidebar toggle events from the header's "open sidebar" button
+    this.sidebarToggleHandler = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      
+      if (detail?.toggle) {
+        // Toggle based on current state
+        this.isSidebarCollapsed = !this.isSidebarCollapsed;
+      } else if (detail?.open !== undefined) {
+        // Force specific state
+        this.isSidebarCollapsed = !detail.open;
+      }
+
+      if (this.isSidebarCollapsed) {
+        this.classList.add('sidebar-collapsed');
+      } else {
+        this.classList.remove('sidebar-collapsed');
+      }
+      
+      // Dispatch state change for header visibility if needed
+      document.dispatchEvent(new CustomEvent('apple-sidebar-state-changed', {
+        detail: { collapsed: this.isSidebarCollapsed }
+      }));
+    };
+    this.addEventListener('apple-sidebar-toggled', this.sidebarToggleHandler);
+    // Also listen on document for events that bubble from header container
+    document.addEventListener('apple-sidebar-toggled', this.sidebarToggleHandler);
+    
     // Set up registry subscription manager for automatic updates
     this.setupRegistrySubscriptions();
     
@@ -167,6 +195,10 @@ export class AppleHomeView extends HTMLElement {
     }
     if (this.globalRefreshHandler) {
       document.removeEventListener('apple-home-dashboard-refresh', this.globalRefreshHandler);
+    }
+    if (this.sidebarToggleHandler) {
+      this.removeEventListener('apple-sidebar-toggled', this.sidebarToggleHandler);
+      document.removeEventListener('apple-sidebar-toggled', this.sidebarToggleHandler);
     }
     
     // Clean up registry subscription handlers
@@ -877,12 +909,12 @@ export class AppleHomeView extends HTMLElement {
             margin-bottom: var(--section-margin);
           }
           .area-title {
-            font-weight: 600;
-            font-size: var(--apple-section-title-size, 17px);
+            font-weight: 700;
+            font-size: var(--apple-section-title-size, 20px);
             color: #fff;
-            margin: 20px 0 6px;
+            margin: 24px 0 8px;
             padding: 0;
-            letter-spacing: 0.2px;
+            letter-spacing: -0.2px;
             display: flex;
             align-items: center;
             justify-content: space-between;
@@ -890,12 +922,12 @@ export class AppleHomeView extends HTMLElement {
 
           /* Special section titles (Scenes, Cameras) */
           .apple-home-section-title {
-            font-size: var(--apple-section-title-size, 17px);
-            font-weight: 600;
+            font-size: var(--apple-section-title-size, 20px);
+            font-weight: 700;
             color: #fff;
-            margin: 20px 0 6px;
+            margin: 24px 0 8px;
             padding: 0;
-            letter-spacing: 0.2px;
+            letter-spacing: -0.2px;
           }
 
           /* Clickable section titles with arrows */
@@ -1771,7 +1803,7 @@ export class AppleHomeView extends HTMLElement {
           }
 
           /* ============================================
-             IPAD MODE OVERRIDER
+             IPAD MODE OVERRIDES
              ============================================ */
              
           :host(.is-ipad-mode) {
@@ -1779,23 +1811,49 @@ export class AppleHomeView extends HTMLElement {
             justify-content: flex-start !important;
             padding: 0 !important;
             min-height: 100vh !important;
+            min-height: 100dvh !important;
             overflow-x: hidden !important;
           }
 
           :host(.is-ipad-mode) .wrapper-content {
-            margin-left: 320px !important; /* Make room for sidebar */
+            margin-left: 320px !important;
             max-width: calc(100% - 320px) !important;
             width: 100% !important;
             min-height: 100vh;
+            min-height: 100dvh;
             padding: 30px 40px !important;
             position: relative;
             box-sizing: border-box;
-            transition: margin-left 0.4s cubic-bezier(0.2, 0.8, 0.2, 1), max-width 0.4s cubic-bezier(0.2, 0.8, 0.2, 1);
+            overflow-y: auto;
+            -webkit-overflow-scrolling: touch;
+            /* Performance: Hardware acceleration and cleaner transitions */
+            transform: translateZ(0);
+            will-change: transform, margin-left, max-width;
+            transition: margin-left 0.3s cubic-bezier(0.2, 0.8, 0.2, 1),
+                        max-width 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
           }
           
           :host(.is-ipad-mode.sidebar-collapsed) .wrapper-content {
             margin-left: 0 !important;
             max-width: 100% !important;
+          }
+
+          /* Sidebar container positioning and transitions */
+          .sidebar-container {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 320px;
+            height: 100vh;
+            height: 100dvh;
+            z-index: 10000;
+            transition: transform 0.4s cubic-bezier(0.2, 0.8, 0.2, 1);
+            contain: strict;
+          }
+
+          :host(.sidebar-collapsed) .sidebar-container {
+            transform: translateX(-100%);
+            pointer-events: none;
           }
 
           :host(.is-mobile-view) .wrapper-content {
@@ -1805,8 +1863,10 @@ export class AppleHomeView extends HTMLElement {
             min-height: 100vh;
             padding-bottom: 120px !important; /* Space for bottom bar */
             position: relative;
-            border-left: 1px solid rgba(255,255,255,0.05); /* Softer border */
-            border-right: 1px solid rgba(255,255,255,0.05);
+            /* Removed the dark borders that caused 'black something' in background */
+            border-left: none;
+            border-right: none;
+            background: transparent;
           }
 
           :host(.is-mobile-view) .apple-home-header.group-page {
@@ -1829,18 +1889,19 @@ export class AppleHomeView extends HTMLElement {
             transform: translateX(-50%);
             width: fit-content;
             height: 64px;
-            background: rgba(255, 255, 255, 0.25);
-            backdrop-filter: blur(30px) saturate(1.8);
-            -webkit-backdrop-filter: blur(30px) saturate(1.8);
+            background: rgba(255, 255, 255, 0.4);
+            /* Performance: Limit blur on fixed elements to improvecompositing */
+            backdrop-filter: blur(8px) saturate(1.8);
+            -webkit-backdrop-filter: blur(8px) saturate(1.8);
             border-radius: 35px;
             display: flex;
             align-items: center;
             padding: 0 8px;
             gap: 4px;
             z-index: 10000;
-            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15), inset 0 0 0 1px rgba(255, 255, 255, 0.4);
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12), inset 0 0 0 0.5px rgba(255, 255, 255, 0.3);
             transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-            border: 0.5px solid rgba(255, 255, 255, 0.2);
+            border: 0.5px solid rgba(255, 255, 255, 0.1);
           }
 
           .bottom-bar-item {
@@ -1921,20 +1982,26 @@ export class AppleHomeView extends HTMLElement {
         // Initialize Sidebar if not created
         if (!this.sidebarElement) {
           this.sidebarElement = new AppleSidebar(sidebarContainer);
+          
+          // Toggle sidebar visibility on close button click
           this.sidebarElement.setOnClose(() => {
-            this.isSidebarCollapsed = !this.isSidebarCollapsed;
-            this.classList.toggle('sidebar-collapsed', this.isSidebarCollapsed);
+            this.isSidebarCollapsed = true;
+            this.classList.add('sidebar-collapsed');
             
-            // Also notify header to show the top tabs
-            this.dispatchEvent(new CustomEvent('sidebar-toggled', {
-              bubbles: true,
-              composed: true,
-              detail: { collapsed: this.isSidebarCollapsed }
+            // Notify header so it can show the "open sidebar" button
+            document.dispatchEvent(new CustomEvent('apple-sidebar-state-changed', {
+              detail: { collapsed: true }
             }));
+          });
+          
+          // Optional: react to navigation from sidebar
+          this.sidebarElement.setOnNavigate((path: string) => {
+            // The sidebar handles navigation itself via pushState,
+            // but we can use this hook for additional effects if needed
           });
         }
         
-        // Update hass reference
+        // Update hass reference (smart-render inside sidebar prevents scroll jump)
         this.sidebarElement.hass = this._hass;
       }
     } else {
@@ -1942,6 +2009,8 @@ export class AppleHomeView extends HTMLElement {
       if (sidebarContainer) {
         sidebarContainer.style.display = 'none';
       }
+      // Clean up sidebar reference when leaving iPad mode
+      this.sidebarElement = undefined;
     }
     
     if (isMobileView) {

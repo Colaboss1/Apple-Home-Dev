@@ -1142,9 +1142,9 @@ export class StatusSection {
         right: 0;
         bottom: 0;
         z-index: 10000;
-        background: rgba(0, 0, 0, 0.4);
-        backdrop-filter: blur(20px);
-        -webkit-backdrop-filter: blur(20px);
+        background: rgba(0, 0, 0, 0.6);
+        backdrop-filter: none;
+        -webkit-backdrop-filter: none;
         display: flex;
         align-items: center;
         justify-content: center;

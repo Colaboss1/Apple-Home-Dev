@@ -372,9 +372,9 @@ export class WeatherSection {
         font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', Roboto, sans-serif;
         position: relative;
         overflow: hidden;
-        background: var(--apple-card-bg-inactive, rgba(0, 0, 0, 0.3));
-        backdrop-filter: blur(20px);
-        -webkit-backdrop-filter: blur(20px);
+        background: var(--apple-card-bg-inactive, rgba(40, 40, 40, 0.7));
+        backdrop-filter: none;
+        -webkit-backdrop-filter: none;
         border: 1px solid rgba(255, 255, 255, 0.08);
         width: fit-content;
         max-width: 100%;

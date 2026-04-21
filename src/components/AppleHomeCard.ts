@@ -682,18 +682,38 @@ export class AppleHomeCard extends HTMLElement {
         display: flex;
         flex-direction: column;
         cursor: pointer;
-        transition: background-color 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94), opacity 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+        transition: background-color 0.25s cubic-bezier(0.4, 0, 0.2, 1), 
+                    transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1),
+                    opacity 0.2s ease;
         border: none;
         position: relative;
         overflow: hidden;
         user-select: none;
         -webkit-user-select: none;
         -webkit-tap-highlight-color: transparent;
-        backdrop-filter: blur(20px);
-        -webkit-backdrop-filter: blur(20px);
-        width: 100%;
+        backdrop-filter: none;
+        -webkit-backdrop-filter: none;
         height: 100%;
         box-sizing: border-box;
+        /* Performance: Containment for layout and paint */
+        contain: paint layout;
+      }
+      
+      .apple-home-card:hover {
+        background-color: var(--card-bg-hover, rgba(255, 255, 255, 0.15));
+      }
+      
+      .apple-home-card:active {
+        transform: scale(0.96);
+      }
+      
+      /* Smooth appearance for icons */
+      .info-icon ha-icon {
+        transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
+      }
+      
+      .apple-home-card:active .info-icon ha-icon {
+        transform: scale(0.9);
       }
       
       /* Regular Design Card Layout */
@@ -829,11 +849,11 @@ export class AppleHomeCard extends HTMLElement {
       
       .entity-name {
         font-size: var(--apple-card-name-size, 15px);
-        font-weight: 500;
+        font-weight: 600; /* More authentic Apple weight */
         color: var(--card-text-color);
-        margin: 0 0 2px 0;
-        line-height: 1.3;
-        letter-spacing: -0.4px;
+        margin: 0 0 1px 0;
+        line-height: 1.2;
+        letter-spacing: -0.3px;
         word-wrap: break-word;
         word-break: break-word;
         overflow: hidden;

@@ -5,9 +5,8 @@ module.exports = {
   mode: 'production',
   entry: './src/apple-home-strategy.ts',
   output: {
-    clean: true,
-    filename: 'apple-home-dashboard.js', // renamed to match repository name
-    path: path.resolve(__dirname, 'dist'),
+    filename: 'apple-home-dashboard.js',
+    path: path.resolve(__dirname, './'),
   },
   resolve: {
     extensions: ['.ts', '.js'],
