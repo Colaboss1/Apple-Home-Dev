@@ -1900,7 +1900,8 @@ export class AppleHomeView extends HTMLElement {
             gap: 4px;
             z-index: 10000;
             box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12), inset 0 0 0 0.5px rgba(255, 255, 255, 0.3);
-            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            /* Performance: Animation removed for native snappy feel on mobile */
+            transition: none;
             border: 0.5px solid rgba(255, 255, 255, 0.1);
           }
 
@@ -2105,11 +2106,13 @@ export class AppleHomeView extends HTMLElement {
     // Only update if hass actually changed to avoid unnecessary work
     if (this.content && hass) {
       const cards = this.content.querySelectorAll('apple-home-card');
-      cards.forEach((card: any) => {
-        if (card && card.hass !== hass) {
-          card.hass = hass;
+      // Performance: Optimization - batch updates and check for same hass
+      for (const card of Array.from(cards)) {
+        const appleCard = card as any;
+        if (appleCard && appleCard.hass !== hass) {
+          appleCard.hass = hass;
         }
-      });
+      }
     }
     
     // Update page instances with new hass data
