@@ -10,6 +10,9 @@ export class CustomizationManager {
   // Track the dashboard key this manager is associated with
   private currentDashboardKey: string | null = null;
   private dashboardStateListener?: (isActive: boolean, dashboardKey?: string | null) => void;
+  // Save queue logic to prevent race conditions
+  private saveQueue: Promise<any> = Promise.resolve();
+  private isSaving = false;
 
   constructor(hass?: any) {
     this._hass = hass;
@@ -291,17 +294,22 @@ export class CustomizationManager {
       return;
     }
     
-    try {
-      const success = await this.saveCustomizationsToStorage(this._hass, this.customizations);
-      
-      if (!success) {
-        console.error('🏠 APPLE HOME: Failed to save customizations - check Home Assistant setup');
-        console.error('🏠 APPLE HOME: Please create an input_text helper named "apple_home_dashboard_config" for persistent storage');
+    // Add to queue
+    this.saveQueue = this.saveQueue.then(async () => {
+      this.isSaving = true;
+      try {
+        const success = await this.saveCustomizationsToStorage(this._hass, this.customizations);
+        if (!success) {
+          console.error('🏠 APPLE HOME: Failed to save customizations');
+        }
+      } catch (error) {
+        console.error('🏠 APPLE HOME: Error in saveCustomizations:', error);
+      } finally {
+        this.isSaving = false;
       }
-      // Removed global refresh - individual components should handle their own updates
-    } catch (error) {
-      console.error('🏠 APPLE HOME: Error in saveCustomizations:', error);
-    }
+    });
+
+    return this.saveQueue;
   }
 
   /**
@@ -449,16 +457,16 @@ export class CustomizationManager {
         const dashboardKey = dashboardMatch[1];
         
         // SPECIAL CASE: For Home Assistant storage, 'lovelace' should be null (default dashboard)
-        // but for component isolation, we'll use 'lovelace' in other methods
+        // or a specific name for custom dashboards.
         if (dashboardKey === 'lovelace') {
-          return null; // Default dashboard for HA storage
+          return null; 
         }
         
+        // Handle sub-pages: if path is /apple-home/room-kitchen, key is still apple-home
         return dashboardKey;
       }
       
-      console.warn('🔑 Could not extract dashboard key from path:', currentPath);
-      return null; // Default fallback for storage
+      return null; // Absolute default
     } catch (error) {
       console.error('🏠 APPLE HOME: Error getting dashboard key:', error);
       return null;

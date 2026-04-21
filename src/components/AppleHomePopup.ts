@@ -103,7 +103,8 @@ export class AppleHomePopup extends HTMLElement {
           display: flex;
           align-items: center;
           justify-content: center;
-          animation: fadeIn 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
+          /* Performance: Snappier 0.2s animation with aggressive iOS-style easing */
+          animation: fadeIn 0.2s cubic-bezier(0.16, 1, 0.3, 1);
           font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', Roboto, sans-serif;
         }
 
@@ -111,13 +112,13 @@ export class AppleHomePopup extends HTMLElement {
           position: absolute;
           top: 0;
           left: 0;
-          width: 100%;
-          height: 100%;
-          background: rgba(0, 0, 0, 0.4);
-          /* Performance: Reduce blur from 40px to 16px */
-          backdrop-filter: blur(16px) saturate(1.5);
-          -webkit-backdrop-filter: blur(16px) saturate(1.5);
+          width: 100vw;
+          height: 100vh;
+          background: rgba(0, 0, 0, 0.7);
+          /* Performance: Blur removed to ensure 120FPS on iPad M4. High-depth semi-transparent black used instead. */
           z-index: 100001;
+          pointer-events: auto;
+          cursor: pointer;
         }
 
         @keyframes fadeIn {
@@ -135,12 +136,15 @@ export class AppleHomePopup extends HTMLElement {
           display: flex;
           flex-direction: column;
           align-items: center;
-          animation: scaleUp 0.4s cubic-bezier(0.2, 0.8, 0.2, 1);
+          /* Performance: Snappier 0.2s scale-up to match iOS home response */
+          animation: scaleUp 0.2s cubic-bezier(0.16, 1, 0.3, 1);
           width: 100%;
           max-width: 450px;
           padding: 30px;
           box-sizing: border-box;
           z-index: 100002;
+          pointer-events: auto; /* Ensure content catches clicks */
+          cursor: default; /* Overrides backdrop cursor */
         }
 
         .slider-container {
@@ -220,6 +224,11 @@ export class AppleHomePopup extends HTMLElement {
           flex-direction: column;
           align-items: center;
           margin-bottom: 30px;
+          display: none; /* Hidden by default, shown if supported */
+        }
+
+        :host(.supports-color) .color-section {
+          display: flex;
         }
 
         .color-grid {
@@ -302,8 +311,8 @@ export class AppleHomePopup extends HTMLElement {
         ${supportsColor || supportsTemp ? `
           <div class="color-section">
             <div class="color-grid">
-              ${this.renderColorCircles(supportsColor, supportsTemp)}
-            </div>
+            ${this.renderColorCircles()}
+          </div>
           </div>
         ` : ''}
 
@@ -319,30 +328,41 @@ export class AppleHomePopup extends HTMLElement {
     `;
   }
 
-  private renderColorCircles(supportsColor: boolean, supportsTemp: boolean): string {
+  private renderColorCircles(): string {
+    if (this.domain === 'light') {
+      const state = this._hass.states[this.entityId];
+      const supportsColor = state?.attributes.supported_color_modes?.some((mode: string) => ['rgb', 'rgbw', 'rgbww', 'hs', 'xy'].includes(mode));
+      const supportsTemp = state?.attributes.supported_color_modes?.includes('color_temp');
+      
+      if (supportsColor || supportsTemp) {
+        this.classList.add('supports-color');
+      } else {
+        this.classList.remove('supports-color');
+      }
+    }
+
+    if (this.domain !== 'light' || !this.classList.contains('supports-color')) return '';
+    
+    const state = this._hass.states[this.entityId];
+    const supportsColor = state?.attributes.supported_color_modes?.some((mode: string) => ['rgb', 'rgbw', 'rgbww', 'hs', 'xy'].includes(mode));
+    const supportsTemp = state?.attributes.supported_color_modes?.includes('color_temp');
+    
     const circles: string[] = [];
     
     if (supportsColor) {
       const colors = [
-        { name: 'Red', rgb: [255, 59, 48] },
-        { name: 'Orange', rgb: [255, 149, 0] },
-        { name: 'Yellow', rgb: [255, 204, 0] },
-        { name: 'Green', rgb: [52, 199, 89] },
-        { name: 'Blue', rgb: [0, 122, 255] },
-        { name: 'Purple', rgb: [175, 82, 222] }
+        { rgb: '255,255,255' }, { rgb: '255,159,10' }, { rgb: '0,122,255' }, 
+        { rgb: '255,45,85' }, { rgb: '175,82,222' }, { rgb: '90,200,250' }
       ];
       
       colors.forEach(c => {
-        circles.push(`<div class="color-circle" style="background: rgb(${c.rgb.join(',')})" data-rgb="${c.rgb.join(',')}"></div>`);
+        circles.push(`<div class="color-circle" style="background: rgb(${c.rgb})" data-rgb="${c.rgb}"></div>`);
       });
-    } else if (supportsTemp) {
+    }
+    
+    if (supportsTemp) {
       const temperatures = [
-        { name: 'Coldest', temp: 153, color: '#d9eaff' },
-        { name: 'Cool', temp: 250, color: '#f0f7ff' },
-        { name: 'Neutral', temp: 300, color: '#fffdf9' },
-        { name: 'Warm', temp: 400, color: '#fff3d6' },
-        { name: 'Warmer', temp: 450, color: '#ffebc2' },
-        { name: 'Warmest', temp: 500, color: '#ffd2a3' }
+        { temp: 153, color: '#fcf8ff' }, { temp: 250, color: '#fffd9f' }, { temp: 370, color: '#ffcc00' }, { temp: 500, color: '#ff9500' }
       ];
       
       temperatures.forEach(t => {
@@ -431,20 +451,25 @@ export class AppleHomePopup extends HTMLElement {
       }, 50);
     };
 
-    // Backdrop click close
+    // Backdrop click close (High sensitivity)
     backdrop?.addEventListener('click', (e) => {
-      // Close ONLY if clicking exactly the backdrop, not something inside it
-      if (e.target === backdrop) {
+      e.stopPropagation();
+      this.remove();
+    }, { capture: true }); // Capture ensures we catch it before children
+    
+    // Also allow closing by clicking the host itself (for clicks that miss the backdrop)
+    this.addEventListener('click', (e) => {
+      // Only close if we clicked exactly the host (dead space)
+      if (e.target === this) {
         e.stopPropagation();
         this.remove();
       }
     });
-    
-    // Also allow closing by clicking the host itself (if it somehow catches clicks)
-    this.addEventListener('click', (e) => {
-      if (e.target === this) {
-        this.remove();
-      }
+
+    // Prevent closing when clicking INSIDE the container
+    const container = this.shadowRoot!.querySelector('.popup-container');
+    container?.addEventListener('click', (e) => {
+      e.stopPropagation();
     });
 
     // Color circles

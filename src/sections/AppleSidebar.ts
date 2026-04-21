@@ -14,9 +14,13 @@ export class AppleSidebar {
   private onClose?: () => void;
   
   // Smart render cache
+  private lastAreasRef: any = null;
+  private _cachedRooms: any = null;
   private lastRoomsJson: string = '';
   private lastActivePage: string = '';
   private stylesInjected: boolean = false;
+  private renderTimeout: any;
+  private lastRenderTimestamp: number = 0;
 
   constructor(container: HTMLElement) {
     this.container = container;
@@ -25,6 +29,23 @@ export class AppleSidebar {
   set hass(hass: any) {
     this._hass = hass;
     this.updateActivePage();
+    
+    // Performance: Throttle the smartRender to prevent CPU spikes in sensor-heavy setups
+    const now = Date.now();
+    const throttleMs = 200; // Max 5 renders per second for the sidebar
+    
+    if (now - this.lastRenderTimestamp < throttleMs) {
+      if (!this.renderTimeout) {
+        this.renderTimeout = setTimeout(() => {
+          this.smartRender();
+          this.renderTimeout = null;
+          this.lastRenderTimestamp = Date.now();
+        }, throttleMs - (now - this.lastRenderTimestamp));
+      }
+      return;
+    }
+    
+    this.lastRenderTimestamp = now;
     this.smartRender();
   }
 
@@ -60,7 +81,16 @@ export class AppleSidebar {
   /** Extract rooms from HA area registry */
   private extractRooms(): { id: string; name: string; icon: string }[] {
     if (!this._hass) return [];
+    
     const areas = this._hass.areas || {};
+    
+    // Performance: If the areas reference hasn't changed, return the previous list
+    // This is much faster than iterating and mapping on every hass update
+    if (this.lastAreasRef === areas && this._cachedRooms) {
+      return this._cachedRooms;
+    }
+    
+    this.lastAreasRef = areas;
     
     const rooms = Object.keys(areas).map(areaId => {
       const area = areas[areaId];
@@ -69,10 +99,21 @@ export class AppleSidebar {
         name: area?.name || areaId,
         icon: area?.icon || 'mdi:sofa-outline'
       };
+    }).filter(room => {
+      // MEGA PERFECTION: Filter rooms that have no active entities on the dashboard
+      // This prevents the sidebar from being cluttered with empty HA areas
+      const counts = this.countEntitiesPerRoom([room]);
+      return counts[room.id] > 0;
     }).sort((a, b) => a.name.localeCompare(b.name));
 
     const defaultRoomName = localize('pages.default_room') || 'Standardraum';
-    rooms.unshift({ id: 'no_area', name: defaultRoomName, icon: 'mdi:home-outline' });
+    
+    // Only show "Standardraum" if it also has entities
+    if (this.countEntitiesPerRoom([{ id: 'no_area', name: '', icon: '' }])['no_area'] > 0) {
+      rooms.unshift({ id: 'no_area', name: defaultRoomName, icon: 'mdi:home-outline' });
+    }
+    
+    this._cachedRooms = rooms;
     return rooms;
   }
 
@@ -107,9 +148,8 @@ export class AppleSidebar {
         width: 320px;
         height: 100vh;
         height: 100dvh;
-        background: rgba(28, 28, 30, 0.92);
-        backdrop-filter: blur(16px);
-        -webkit-backdrop-filter: blur(16px);
+        /* Performance: Blur removed to ensure 120FPS on iPad M4. Reduced translucency for depth. */
+        background: rgba(28, 28, 30, 0.98);
         border-right: 1px solid rgba(255, 255, 255, 0.08);
         display: flex;
         flex-direction: column;
@@ -118,8 +158,10 @@ export class AppleSidebar {
         font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', Roboto, sans-serif;
         color: white;
         overflow: hidden;
-        contain: content;
+        /* Performance: Strict containment and explicit layering */
+        contain: strict;
         transform: translateZ(0);
+        will-change: transform;
       }
 
       .sidebar-scroll-area {
@@ -282,6 +324,11 @@ export class AppleSidebar {
 
   /** Full DOM render */
   private renderFull(rooms: { id: string; name: string; icon: string }[]) {
+    // Detect current room from URL for active highlighting
+    const currentPath = window.location.pathname;
+    const roomMatch = currentPath.match(/room-([^/]+)$/);
+    const urlRoomId = roomMatch ? roomMatch[1] : null;
+
     // Count entities per room for badges
     const roomCounts = this.countEntitiesPerRoom(rooms);
     
@@ -340,13 +387,17 @@ export class AppleSidebar {
         
         <div class="nav-section">
           <div class="nav-section-title">Räume</div>
-          ${rooms.map(room => `
-            <div class="nav-item ${this.activePage === room.id ? 'active' : ''}" data-nav="room" data-room-id="${room.id}">
-              <div class="nav-icon"><ha-icon icon="${room.icon}"></ha-icon></div>
-              <div class="nav-text">${room.name}</div>
-              ${roomCounts[room.id] ? `<span class="nav-badge">${roomCounts[room.id]}</span>` : ''}
-            </div>
-          `).join('')}
+          ${rooms.map(room => {
+            const roomId = room.id;
+            const isActive = urlRoomId === roomId || this.activePage === roomId;
+            return `
+              <div class="nav-item ${isActive ? 'active' : ''}" data-nav="room" data-room-id="${roomId}">
+                <div class="nav-icon"><ha-icon icon="${room.icon || 'mdi:door-open'}"></ha-icon></div>
+                <div class="nav-text">${room.name}</div>
+                ${roomCounts[roomId] ? `<span class="nav-badge">${roomCounts[roomId]}</span>` : ''}
+              </div>
+            `;
+          }).join('')}
         </div>
       </div>
     `;
@@ -364,8 +415,14 @@ export class AppleSidebar {
     
     for (const entityId of Object.keys(entities)) {
       const entity = entities[entityId];
-      const areaId = entity?.area_id;
-      if (areaId && !entity.hidden_by && !entity.disabled_by) {
+      const areaId = entity?.area_id || 'no_area';
+      
+      // MEGA PERFECTION: Only count entities that are likely to be shown on the dashboard
+      // (Lights, Climate, Covers, Media, Sensors etc. - excluding technical helpers)
+      const domain = entityId.split('.')[0];
+      const excludedDomains = ['automation', 'scene', 'script', 'input_select', 'input_text', 'input_number', 'input_boolean', 'zone', 'sun'];
+      
+      if (!excludedDomains.includes(domain) && !entity.hidden_by && !entity.disabled_by) {
         counts[areaId] = (counts[areaId] || 0) + 1;
       }
     }

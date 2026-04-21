@@ -37,6 +37,7 @@ export class AppleHomeView extends HTMLElement {
   private visibilityChangeHandler?: () => void; // Add visibility change handler
   private globalRefreshHandler?: (event: Event) => void; // Add global refresh handler
   private currentDashboardKey: string = 'default'; // Track current dashboard key
+  private _updateRequest: number | null = null; // Track frame update request
   
   // iPad Mode Properties
   private sidebarElement?: AppleSidebar;
@@ -1782,16 +1783,14 @@ export class AppleHomeView extends HTMLElement {
              MOBILE VIEW OVERRIDER (Forced Mobile)
              ============================================ */
           :host {
-            transition: background-color 0.4s ease, padding 0.4s ease;
+            transition: none;
           }
 
           .wrapper-content {
             margin: 0 auto;
             max-width: 100%;
-            transition: max-width 0.4s cubic-bezier(0.2, 0.8, 0.2, 1), 
-                        padding 0.4s cubic-bezier(0.2, 0.8, 0.2, 1), 
-                        background 0.4s ease, 
-                        box-shadow 0.4s ease;
+            transition: max-width 0.25s cubic-bezier(0.16, 1, 0.3, 1), 
+                        padding 0.25s cubic-bezier(0.16, 1, 0.3, 1);
           }
 
           :host(.is-mobile-view) {
@@ -1829,8 +1828,8 @@ export class AppleHomeView extends HTMLElement {
             /* Performance: Hardware acceleration and cleaner transitions */
             transform: translateZ(0);
             will-change: transform, margin-left, max-width;
-            transition: margin-left 0.3s cubic-bezier(0.2, 0.8, 0.2, 1),
-                        max-width 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
+            transition: margin-left 0.25s cubic-bezier(0.16, 1, 0.3, 1),
+                        max-width 0.25s cubic-bezier(0.16, 1, 0.3, 1);
           }
           
           :host(.is-ipad-mode.sidebar-collapsed) .wrapper-content {
@@ -1847,7 +1846,7 @@ export class AppleHomeView extends HTMLElement {
             height: 100vh;
             height: 100dvh;
             z-index: 10000;
-            transition: transform 0.4s cubic-bezier(0.2, 0.8, 0.2, 1);
+            transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1);
             contain: strict;
           }
 
@@ -1861,7 +1860,7 @@ export class AppleHomeView extends HTMLElement {
             width: 100% !important;
             margin: 0 auto !important;
             min-height: 100vh;
-            padding-bottom: 120px !important; /* Space for bottom bar */
+            padding-bottom: calc(120px + env(safe-area-inset-bottom, 0px)) !important; /* Space for bottom bar + iPhone bar */
             position: relative;
             /* Removed the dark borders that caused 'black something' in background */
             border-left: none;
@@ -1884,25 +1883,22 @@ export class AppleHomeView extends HTMLElement {
 
           .bottom-indicator-bar {
             position: fixed;
-            bottom: 34px;
+            bottom: calc(34px + env(safe-area-inset-bottom, 0px));
             left: 50%;
             transform: translateX(-50%);
             width: fit-content;
             height: 64px;
-            background: rgba(255, 255, 255, 0.4);
-            /* Performance: Limit blur on fixed elements to improvecompositing */
-            backdrop-filter: blur(8px) saturate(1.8);
-            -webkit-backdrop-filter: blur(8px) saturate(1.8);
+            background: rgba(230, 230, 230, 0.9);
             border-radius: 35px;
             display: flex;
             align-items: center;
             padding: 0 8px;
             gap: 4px;
             z-index: 10000;
-            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12), inset 0 0 0 0.5px rgba(255, 255, 255, 0.3);
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
             /* Performance: Animation removed for native snappy feel on mobile */
             transition: none;
-            border: 0.5px solid rgba(255, 255, 255, 0.1);
+            border: 0.5px solid rgba(255, 255, 255, 0.4);
           }
 
           .bottom-bar-item {
@@ -1913,17 +1909,17 @@ export class AppleHomeView extends HTMLElement {
              padding: 0 24px;
              height: 52px;
              border-radius: 30px;
-             color: rgba(0, 0, 0, 0.6);
-             transition: all 0.25s ease;
+             color: rgba(60, 60, 67, 0.6);
+             transition: none;
              cursor: pointer;
              gap: 2px;
              position: relative;
           }
 
           .bottom-bar-item.active {
-             background: rgba(255, 255, 255, 0.6);
+             background: rgba(255, 255, 255, 1);
              color: #000;
-             box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.4), 0 2px 10px rgba(0,0,0,0.05);
+             box-shadow: 0 2px 8px rgba(0,0,0,0.1);
           }
 
           .bottom-bar-item ha-icon {
@@ -1995,6 +1991,16 @@ export class AppleHomeView extends HTMLElement {
             }));
           });
           
+          // Listen for re-open from header
+          document.addEventListener('apple-sidebar-toggled', () => {
+            this.isSidebarCollapsed = false;
+            this.classList.remove('sidebar-collapsed');
+            // Re-broadcast to header to hide button
+            document.dispatchEvent(new CustomEvent('apple-sidebar-state-changed', {
+              detail: { collapsed: false }
+            }));
+          });
+          
           // Optional: react to navigation from sidebar
           this.sidebarElement.setOnNavigate((path: string) => {
             // The sidebar handles navigation itself via pushState,
@@ -2020,8 +2026,6 @@ export class AppleHomeView extends HTMLElement {
         const pageType = this.config?.pageType;
         const isAutomationPage = pageType === 'scenes' || pageType === 'cameras';
         
-        // Only create HTML and attach listeners if it doesn't exist yet
-        // This prevents the animation from re-triggering constantly on state updates
         if (!barContainer.querySelector('.bottom-indicator-bar')) {
           barContainer.innerHTML = `
             <div class="bottom-indicator-bar">
@@ -2036,12 +2040,8 @@ export class AppleHomeView extends HTMLElement {
             </div>
           `;
           
-          // Add listeners
           const getBasePath = () => {
             const path = window.location.pathname;
-            // Standard HA path
-            if (path.startsWith('/lovelace/')) return '/lovelace/';
-            // Custom dashboard path
             const parts = path.split('/').filter(p => p.length > 0);
             return parts.length > 0 ? `/${parts[0]}/` : '/lovelace/';
           };
@@ -2064,7 +2064,6 @@ export class AppleHomeView extends HTMLElement {
             }
           });
         } else {
-          // If structure exists, just update active states
           const homeTab = barContainer.querySelector('#nav-home');
           const automationTab = barContainer.querySelector('#nav-automation');
           if (isAutomationPage) {
@@ -2105,14 +2104,23 @@ export class AppleHomeView extends HTMLElement {
     // Update all existing apple-home-card elements with new hass
     // Only update if hass actually changed to avoid unnecessary work
     if (this.content && hass) {
-      const cards = this.content.querySelectorAll('apple-home-card');
-      // Performance: Optimization - batch updates and check for same hass
-      for (const card of Array.from(cards)) {
-        const appleCard = card as any;
-        if (appleCard && appleCard.hass !== hass) {
-          appleCard.hass = hass;
+      // Performance: Optimization - Prevent redundant updates if hass main state hasn't changed
+      if (this._hass === hass) return;
+
+      // Use requestAnimationFrame to ensure we don't hog the main thread during high-frequency updates
+      if (this._updateRequest) cancelAnimationFrame(this._updateRequest);
+      
+      this._updateRequest = requestAnimationFrame(() => {
+        const cards = this.content!.querySelectorAll('apple-home-card');
+        for (const card of Array.from(cards)) {
+          const appleCard = card as any;
+          if (appleCard && appleCard.hass !== hass) {
+            appleCard.hass = hass;
+          }
         }
-      }
+        this._hass = hass;
+        this._updateRequest = null;
+      });
     }
     
     // Update page instances with new hass data

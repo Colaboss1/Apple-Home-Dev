@@ -17,6 +17,7 @@ export interface HeaderConfig {
   showMenu: boolean;
   showBackButton?: boolean;
   chipsElement?: HTMLElement;
+  pageType?: string;
 }
 
 export class AppleHeader {
@@ -487,9 +488,18 @@ export class AppleHeader {
               </div>
             ` : ''}
             <div class="apple-ipad-top-nav">
-               <div class="ipad-nav-item active"><ha-icon icon="mdi:home-variant-outline"></ha-icon><span>${localize('pages.my_home') || 'Zuhause'}</span></div>
-               <div class="ipad-nav-item"><ha-icon icon="mdi:clock-star-four-points"></ha-icon><span>${localize('ui_actions.automation') || 'Automation'}</span></div>
-               <div class="ipad-nav-item"><ha-icon icon="mdi:star-outline"></ha-icon><span>Entdecken</span></div>
+               <div class="ipad-nav-item ${(!this.currentConfig.pageType || this.currentConfig.pageType === 'home') ? 'active' : ''}" data-nav="home">
+                 <ha-icon icon="mdi:home-variant-outline"></ha-icon>
+                 <span>${localize('pages.my_home') || 'Zuhause'}</span>
+               </div>
+               <div class="ipad-nav-item ${(this.currentConfig.pageType === 'scenes' || this.currentConfig.pageType === 'cameras') ? 'active' : ''}" data-nav="automation">
+                 <ha-icon icon="mdi:clock-star-four-points"></ha-icon>
+                 <span>${localize('ui_actions.automation') || 'Automation'}</span>
+               </div>
+               <div class="ipad-nav-item" data-nav="explore">
+                 <ha-icon icon="mdi:star-outline"></ha-icon>
+                 <span>Entdecken</span>
+               </div>
             </div>
             <button class="apple-header-sidebar-open-btn ${LiquidGlassClasses.headerButton}">
                <ha-icon icon="${RTLHelper.isRTL() ? 'mdi:dock-left' : 'mdi:dock-right'}"></ha-icon>
@@ -808,23 +818,17 @@ export class AppleHeader {
 
     // IPAD Top Navigation listeners
     const ipadNavItems = this.headerElement?.querySelectorAll('.apple-ipad-top-nav .ipad-nav-item');
-    ipadNavItems?.forEach((item, index) => {
+    ipadNavItems?.forEach((item) => {
       item.addEventListener('click', (e: Event) => {
         e.stopPropagation();
-        // Remove active class from all
-        ipadNavItems.forEach(i => i.classList.remove('active'));
-        // Add active to current
-        item.classList.add('active');
+        const nav = (item as HTMLElement).getAttribute('data-nav');
         
-        // Navigate based on index or text
-        const text = (item.querySelector('span')?.textContent || '').toLowerCase();
-        if (text.includes('zuhause') || text.includes('home')) {
+        if (nav === 'home') {
           this.navigateToHome();
-        } else if (text.includes('automation')) {
-          this.navigateToAutomation();
-        } else if (text.includes('entdecken') || text.includes('explore')) {
-          // No specialized page for 'Entdecken' yet, let's go to default or do nothing
-          console.log('Navigation to Explore not implemented yet');
+        } else if (nav === 'automation') {
+          this.navigateToPath('scenes');
+        } else if (nav === 'explore') {
+          console.log('Explore not implemented');
         }
       });
     });
@@ -1866,9 +1870,8 @@ export class AppleHeader {
         left: 50%;
         top: 50%;
         transform: translate(-50%, -50%);
-        background: rgba(40, 40, 40, 0.85);
-        backdrop-filter: blur(16px);
-        -webkit-backdrop-filter: blur(16px);
+        /* Performance: Blur removed for 120FPS smoothness. */
+        background: rgba(40, 40, 40, 0.98);
         border: 1px solid rgba(255, 255, 255, 0.1);
         border-radius: 12px;
         padding: 4px;
@@ -2729,22 +2732,23 @@ export class AppleHeader {
     const currentPath = window.location.pathname;
     let basePath = '';
     
-    if (currentPath.startsWith('/lovelace/')) {
-      basePath = '/lovelace/';
+    // Better path detection for custom dashboards
+    const pathParts = currentPath.split('/').filter(p => p.length > 0);
+    if (pathParts.length > 0) {
+      // If we're at /apple-home/room-kitchen, the base is /apple-home/
+      basePath = `/${pathParts[0]}/`;
     } else {
-      const pathParts = currentPath.split('/').filter(part => part.length > 0);
-      if (pathParts.length > 0) {
-        basePath = `/${pathParts[0]}/`;
-      } else {
-        basePath = '/lovelace/';
-      }
+      basePath = '/lovelace/';
     }
     
     const cleanPath = path.startsWith('/') ? path.slice(1) : path;
     const newUrl = `${basePath}${cleanPath}`;
     
-    window.history.pushState(null, '', newUrl);
-    window.dispatchEvent(new CustomEvent('location-changed'));
+    // Only navigate if path changes
+    if (newUrl !== currentPath) {
+      window.history.pushState(null, '', newUrl);
+      window.dispatchEvent(new CustomEvent('location-changed'));
+    }
   }
 
   destroy() {
