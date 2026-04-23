@@ -67,8 +67,8 @@ export const designTokensCSS = `
          ============================================ */
       
       /* Inactive/Off state backgrounds */
-      --apple-card-bg-inactive: rgba(0, 0, 0, 0.3);
-      --apple-chip-bg-inactive: rgba(0, 0, 0, 0.3);
+      --apple-card-bg-inactive: rgba(0, 0, 0, 0.25);
+      --apple-chip-bg-inactive: rgba(0, 0, 0, 0.35);
       --apple-icon-bg-inactive: rgba(0, 0, 0, 0.2);
       
       /* Active/On state backgrounds */
@@ -183,6 +183,8 @@ export const liquidGlassCSS = `
       transition: all 0.2s ease !important;
       position: relative;
       isolation: isolate;
+      transform: translateZ(0); /* Hardware acceleration for backdrop-filter */
+      will-change: transform, backdrop-filter;
       /* Unified button size */
       width: var(--apple-action-btn-size, 40px) !important;
       height: var(--apple-action-btn-size, 40px) !important;

@@ -23,6 +23,8 @@ export class AppleHomeCard extends HTMLElement {
   private boundCardClick?: (e: Event) => void;
   private boundIconClick?: (e: Event) => void;
   private _hasRendered: boolean = false;
+  private observer?: IntersectionObserver;
+  private isVisible: boolean = true; // Default to true until observer says otherwise
 
   constructor() {
     super();
@@ -58,13 +60,16 @@ export class AppleHomeCard extends HTMLElement {
           this.lastDisplayedTimestamp = undefined; // Force showing current snapshot
           this.queryAndUpdateSnapshot();
           
-          if (!this.queryTimer) {
-            this.queryTimer = window.setInterval(() => {
-              this.queryAndUpdateSnapshot();
-            }, 1000);
+          if (!this.queryTimer && this.isVisible) {
+            this.startCameraTimer();
           }
         }
       }, 50);
+    }
+    
+    // Setup intersection observer for cameras
+    if (this.domain === 'camera' && this.cameraView === 'snapshot') {
+      this.setupObserver();
     }
   }
 
@@ -105,6 +110,11 @@ export class AppleHomeCard extends HTMLElement {
     
     // Note: We don't unregister from SnapshotManager here because the camera
     // might still be valid and we want background fetching to continue
+    
+    if (this.observer) {
+      this.observer.disconnect();
+      this.observer = undefined;
+    }
   }
 
   static getStubConfig() {
@@ -193,6 +203,7 @@ export class AppleHomeCard extends HTMLElement {
     
     if (!this.shadowRoot) {
       this.attachShadow({ mode: 'open' });
+      this.shadowRoot.adoptedStyleSheets = [AppleHomeCard.styles];
     }
     
     // For camera cards, clear the timer and image references before re-rendering
@@ -275,9 +286,6 @@ export class AppleHomeCard extends HTMLElement {
     }
     
     this.shadowRoot!.innerHTML = `
-      <style>
-        ${this.getCardStyles(entityData, isEditMode)}
-      </style>
       <div class="apple-home-card ${isEditMode ? 'edit-mode' : ''} ${this.domain === 'camera' && this.cameraView === 'snapshot' ? 'camera-card' : ''} ${RTLHelper.isRTL() ? 'rtl' : 'ltr'}">
         <div class="card-info">
           ${iconElement}
@@ -352,20 +360,31 @@ export class AppleHomeCard extends HTMLElement {
             // Immediately check for existing snapshot and display it
             this.queryAndUpdateSnapshot();
             
-            // Start query timer to check for new snapshots every second
-            if (!this.queryTimer) {
-              this.queryTimer = window.setInterval(() => {
-                this.queryAndUpdateSnapshot();
-              }, 1000);
+            // Start query timer to check for new snapshots every second if visible
+            if (!this.queryTimer && this.isVisible) {
+              this.startCameraTimer();
             }
           }
         }, 100);
       }
     }
+    
+    // Ensure observer is setup for cameras
+    if (this.domain === 'camera' && this.cameraView === 'snapshot') {
+      this.setupObserver();
+    }
   }
 
   private updateCSSVariables(entityData: any) {
     this.style.setProperty('--card-bg-color', entityData.backgroundColor);
+    
+    // Only apply blur to inactive cards to save performance, and use translateZ(0) for GPU
+    if (entityData.isActive) {
+      this.style.setProperty('--card-backdrop-filter', 'none');
+    } else {
+      this.style.setProperty('--card-backdrop-filter', 'blur(15px)');
+    }
+    
     this.style.setProperty('--card-icon-color', entityData.iconColor);
     this.style.setProperty('--card-icon-bg', entityData.iconBackgroundColor);
     this.style.setProperty('--card-text-color', entityData.textColor);
@@ -444,9 +463,43 @@ export class AppleHomeCard extends HTMLElement {
     // Immediately check for existing snapshot and display it
     this.queryAndUpdateSnapshot();
     
-    // Start query timer to check for new snapshots every second
+    // Start query timer to check for new snapshots every second if visible
+    if (this.isVisible) {
+      this.startCameraTimer();
+    }
+  }
+
+  private setupObserver(): void {
+    if (this.observer || typeof IntersectionObserver === 'undefined') return;
+    
+    this.observer = new IntersectionObserver((entries) => {
+      entries.forEach(entry => {
+        this.isVisible = entry.isIntersecting;
+        if (this.isVisible) {
+          // Camera came into view
+          this.queryAndUpdateSnapshot(); // Get one immediately
+          if (!this.queryTimer && this.cameraImages.length > 0 && !this.cameraSnapshotFailed) {
+            this.startCameraTimer();
+          }
+        } else {
+          // Camera went out of view - pause polling
+          if (this.queryTimer) {
+            clearInterval(this.queryTimer);
+            this.queryTimer = undefined;
+          }
+        }
+      });
+    }, { threshold: 0.05 });
+    
+    this.observer.observe(this);
+  }
+
+  private startCameraTimer(): void {
+    if (this.queryTimer) return;
     this.queryTimer = window.setInterval(() => {
-      this.queryAndUpdateSnapshot();
+      if (this.isVisible) {
+        this.queryAndUpdateSnapshot();
+      }
     }, 1000);
   }
 
@@ -649,8 +702,12 @@ export class AppleHomeCard extends HTMLElement {
     `;
   }
 
-  private getCardStyles(entityData: any, isEditMode: boolean = false): string {
-    return `
+  private static _styles?: CSSStyleSheet;
+
+  private static get styles(): CSSStyleSheet {
+    if (!AppleHomeCard._styles) {
+      const sheet = new CSSStyleSheet();
+      sheet.replaceSync(`
       :host {
         display: block;
         width: 100%;
@@ -691,8 +748,8 @@ export class AppleHomeCard extends HTMLElement {
         user-select: none;
         -webkit-user-select: none;
         -webkit-tap-highlight-color: transparent;
-        backdrop-filter: none;
-        -webkit-backdrop-filter: none;
+        backdrop-filter: var(--card-backdrop-filter, none);
+        -webkit-backdrop-filter: var(--card-backdrop-filter, none);
         height: 100%;
         box-sizing: border-box;
         /* Performance: Containment for layout and paint */
@@ -1077,7 +1134,10 @@ export class AppleHomeCard extends HTMLElement {
           max-height: 1.3em;
         }
       }
-    `;
+      `);
+      AppleHomeCard._styles = sheet;
+    }
+    return AppleHomeCard._styles;
   }
 
   private handleCardClick(event: Event) {

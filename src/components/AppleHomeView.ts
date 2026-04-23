@@ -20,828 +20,12 @@ import { DeviceGroup } from '../config/DashboardConfig';
 import { RegistrySubscriptionManager, RegistryChangeCallback, RegistryChangeEvent } from '../utils/RegistrySubscriptionManager';
 
 export class AppleHomeView extends HTMLElement {
-  // Dashboard-specific management - keyed by dashboard URL base
-  private static dashboardActiveInstances = new Map<string, AppleHomeView>();
-  private static dashboardStateListeners = new Map<string, (isActive: boolean) => void>();
-  
-  private config?: any;
-  private _hass?: any;
-  private _config?: any;
-  private content?: HTMLElement;
-  private _isIpadMode = false;
-  private _rendered = false;
-  private _isTransitioning = false; // Add transition state
-  private _lastRenderTime = 0; // Track when last render happened
-  private _modeSwitchDebounce: number | null = null; // Prevent rapid mode switching
-  private chipsElement?: AppleChips;
-  private visibilityChangeHandler?: () => void; // Add visibility change handler
-  private globalRefreshHandler?: (event: Event) => void; // Add global refresh handler
-  private currentDashboardKey: string = 'default'; // Track current dashboard key
-  private _updateRequest: number | null = null; // Track frame update request
-  
-  // iPad Mode Properties
-  private sidebarElement?: AppleSidebar;
-  private isSidebarCollapsed: boolean = false;
-  private resizeObserver?: ResizeObserver;
-  private sidebarToggleHandler?: (e: Event) => void;
-  private backgroundManager!: BackgroundManager;
-  
-  // Registry subscription handlers for automatic updates
-  private registrySubscriptionManager?: RegistrySubscriptionManager;
-  private registryChangeHandler?: RegistryChangeCallback;
-  private rtlChangeHandler?: (isRTL: boolean, language: string) => void;
-  private _lastLanguage?: string; // Track language for change detection
-  
-  // Helper methods for dashboard-specific management
-  private getDashboardKey(): string {
-    // Extract dashboard key directly from URL (independent method)
-    const currentPath = window.location.pathname;
-    const dashboardMatch = currentPath.match(/\/([^\/]+)/);
-    return dashboardMatch && dashboardMatch[1] ? dashboardMatch[1] : 'default';
-  }
-  
-  private getCurrentActiveInstance(): AppleHomeView | undefined {
-    return AppleHomeView.dashboardActiveInstances.get(this.currentDashboardKey);
-  }
-  
-  private setCurrentActiveInstance(instance: AppleHomeView | undefined): void {
-    if (instance) {
-      AppleHomeView.dashboardActiveInstances.set(this.currentDashboardKey, instance);
-    } else {
-      AppleHomeView.dashboardActiveInstances.delete(this.currentDashboardKey);
-    }
-  }
-  
-  // Page renderers
-  private homePage: HomePage;
-  private groupPage: GroupPage;
-  private roomPage: RoomPage;
-  private scenesPage: ScenesPage;
-  private camerasPage: CamerasPage;
+  private static _styles?: CSSStyleSheet;
 
-  // Managers
-  private customizationManager: CustomizationManager;
-  private cardManager: CardManager;
-  private editModeManager: EditModeManager;
-  private appleHeader: AppleHeader;
-  private refreshCallback: () => void;
-  private dragAndDropManager: DragAndDropManager;
-
-  constructor() {
-    super();
-    
-    // Initialize dashboard key for this instance
-    this.currentDashboardKey = this.getDashboardKey();
-    
-    // Initialize callbacks
-    this.refreshCallback = () => this.refreshDashboard();
-
-    // Initialize managers as instance-specific but use singleton for customization
-    this.customizationManager = CustomizationManager.getInstance();
-    this.backgroundManager = new BackgroundManager(this.customizationManager);
-    this.cardManager = new CardManager(this.customizationManager);
-    this.editModeManager = new EditModeManager((editMode) => this.handleEditModeChange(editMode));
-    
-    // Create instance-specific header (NO SINGLETON!) and pass editModeManager
-    this.appleHeader = new AppleHeader(true);
-    this.appleHeader.setEditModeManager(this.editModeManager);
-    this.appleHeader.addRefreshCallback(this.refreshCallback);
-    
-    this.dragAndDropManager = new DragAndDropManager(
-      (areaId: string) => this.handleSaveCurrentOrder(areaId),
-      this.customizationManager,
-      'home' // Use home context for home page
-    );
-    
-    // Initialize page renderers
-    this.homePage = new HomePage();
-    this.groupPage = new GroupPage();
-    this.roomPage = new RoomPage();
-    this.scenesPage = new ScenesPage();
-    this.camerasPage = new CamerasPage();
-    
-    // Set up header manager dependencies
-    this.appleHeader.setCustomizationManager(this.customizationManager);
-    
-  }
-
-  connectedCallback() {
-    // Create and store visibility change handler to pause cameras when hidden
-    this.visibilityChangeHandler = () => {
-      if (document.hidden) {
-        // Pause all cameras when page becomes hidden
-        this.pauseCameras();
-      } else {
-        // Resume cameras when page becomes visible
-        this.resumeCameras();
-      }
-    };
-    document.addEventListener('visibilitychange', this.visibilityChangeHandler);
-
-    // Create and store global refresh handler
-    this.globalRefreshHandler = (event: Event) => {
-      const customEvent = event as CustomEvent;
-      // Only refresh if we have hass and this is a different customization update
-      if (this._hass && customEvent.detail?.customizations) {
-        this.handleGlobalRefresh(customEvent.detail.customizations);
-      }
-    };
-    document.addEventListener('apple-home-dashboard-refresh', this.globalRefreshHandler);
-    
-    // Listen for sidebar toggle events from the header's "open sidebar" button
-    this.sidebarToggleHandler = (e: Event) => {
-      const detail = (e as CustomEvent).detail;
-      
-      if (detail?.toggle) {
-        // Toggle based on current state
-        this.isSidebarCollapsed = !this.isSidebarCollapsed;
-      } else if (detail?.open !== undefined) {
-        // Force specific state
-        this.isSidebarCollapsed = !detail.open;
-      }
-
-      if (this.isSidebarCollapsed) {
-        this.classList.add('sidebar-collapsed');
-      } else {
-        this.classList.remove('sidebar-collapsed');
-      }
-      
-      // Dispatch state change for header visibility if needed
-      document.dispatchEvent(new CustomEvent('apple-sidebar-state-changed', {
-        detail: { collapsed: this.isSidebarCollapsed }
-      }));
-    };
-    this.addEventListener('apple-sidebar-toggled', this.sidebarToggleHandler);
-    // Also listen on document for events that bubble from header container
-    document.addEventListener('apple-sidebar-toggled', this.sidebarToggleHandler);
-    
-    // Set up registry subscription manager for automatic updates
-    this.setupRegistrySubscriptions();
-    
-    // Set up RTL change detection
-    this.setupRTLChangeDetection();
-    
-    // Note: Dashboard registration is handled by the strategy when it generates the dashboard
-    // The DashboardStateManager tracks which dashboards are Apple Home dashboards
-    
-    // CRITICAL: Set this as the active instance for this dashboard
-    this.setCurrentActiveInstance(this);
-
-  }
-
-  disconnectedCallback() {
-    // Clean up event listeners
-    if (this.visibilityChangeHandler) {
-      document.removeEventListener('visibilitychange', this.visibilityChangeHandler);
-    }
-    if (this.globalRefreshHandler) {
-      document.removeEventListener('apple-home-dashboard-refresh', this.globalRefreshHandler);
-    }
-    if (this.sidebarToggleHandler) {
-      this.removeEventListener('apple-sidebar-toggled', this.sidebarToggleHandler);
-      document.removeEventListener('apple-sidebar-toggled', this.sidebarToggleHandler);
-    }
-    
-    // Clean up registry subscription handlers
-    this.cleanupRegistrySubscriptions();
-    
-    // Clean up RTL change detection
-    this.cleanupRTLChangeDetection();
-    
-    // Clean up instance-specific header callbacks
-    if (this.refreshCallback) {
-      this.appleHeader.removeRefreshCallback(this.refreshCallback);
-    }
-    
-    // Clean up managers and their resources
-    if (this.dragAndDropManager) {
-      this.dragAndDropManager.disableDragAndDrop(this.content!);
-    }
-    
-    // Clear active instance reference if this is the active one for this dashboard
-    if (this.getCurrentActiveInstance() === this) {
-      this.setCurrentActiveInstance(undefined);
-    }
-    
-    // Clean up all camera managers in the current content
-    this.cleanupCameras();
-    
-    // Note: We don't manually set dashboard inactive here
-    // The DashboardStateManager handles this automatically via URL change detection
-  }
-
-  private async handleGlobalRefresh(customizations: any) {
-    try {
-      // Update the customization manager with fresh data
-      await this.customizationManager.setCustomizations(customizations);
-      
-      // Update config with fresh customizations
-      this.config = {
-        ...this.config,
-        customizations: customizations
-      };
-      
-      // Apply changes immediately if not already rendered by customization changes
-      this._rendered = false;
-      await this.renderPage('globalRefresh');
-      
-    } catch (error) {
-      console.error('🏠 APPLE HOME: Error during global refresh:', error);
-    }
-  }
-
-  /**
-   * Set up registry subscription manager for automatic updates
-   * This handles: entity area changes, device moves, entity hide/delete/disable
-   */
-  private setupRegistrySubscriptions(): void {
-    this.registrySubscriptionManager = RegistrySubscriptionManager.getInstance();
-    
-    // Create the handler for registry changes
-    this.registryChangeHandler = (event) => {
-      if (this.editModeManager?.editMode) return;
-      this.handleRegistryChange(event);
-    };
-    
-    this.registrySubscriptionManager.addListener(this.registryChangeHandler);
-    
-    // Initialize with hass if available
-    if (this._hass) {
-      this.registrySubscriptionManager.setHass(this._hass);
-    }
-  }
-
-  /**
-   * Clean up registry subscriptions
-   */
-  private cleanupRegistrySubscriptions(): void {
-    if (this.registryChangeHandler && this.registrySubscriptionManager) {
-      this.registrySubscriptionManager.removeListener(this.registryChangeHandler);
-    }
-    this.registryChangeHandler = undefined;
-  }
-
-  /**
-   * Handle registry changes with surgical DOM updates - no full page rebuilds.
-   */
-  private async handleRegistryChange(event: RegistryChangeEvent): Promise<void> {
-    if (!this._rendered || this._isTransitioning || !this._hass || !this.content) return;
-
-    switch (event.type) {
-      case 'entity':
-        await this.handleEntityChange(event);
-        break;
-      case 'area':
-        await this.handleAreaChange(event);
-        break;
-      case 'device':
-        // Device area changes affect entities on that device.
-        // The entity registry events will fire separately for those, so no action needed here.
-        break;
-    }
-  }
-
-  private async handleEntityChange(event: RegistryChangeEvent): Promise<void> {
-    const entityId = event.data?.entity_id;
-    if (!entityId || !this.content || !this._hass) return;
-
-    if (event.action === 'remove') {
-      this.fadeOutCard(entityId);
-      return;
-    }
-
-    // For create/update, check current entity registry state from hass
-    const entityReg = this._hass.entities?.[entityId];
-
-    if (event.action === 'update' && entityReg) {
-      // Entity hidden or disabled → fade out
-      if (entityReg.hidden_by || entityReg.disabled_by) {
-        this.fadeOutCard(entityId);
-        return;
-      }
-
-      // Check if entity moved areas
-      const newAreaId = entityReg.area_id
-        || (entityReg.device_id ? this._hass.devices?.[entityReg.device_id]?.area_id : null)
-        || 'no_area';
-
-      const wrapper = this.content.querySelector(`.entity-card-wrapper[data-entity-id="${entityId}"]`) as HTMLElement;
-      if (wrapper) {
-        const currentGrid = wrapper.closest('.area-entities') as HTMLElement;
-        const currentAreaId = currentGrid?.dataset?.areaId;
-
-        if (currentAreaId && currentAreaId !== newAreaId) {
-          // Entity moved to a different area
-          const targetGrid = this.content.querySelector(`.area-entities[data-area-id="${newAreaId}"]`) as HTMLElement;
-          if (targetGrid) {
-            // Move card to the target area grid
-            wrapper.style.transition = 'opacity 0.2s ease';
-            wrapper.style.opacity = '0';
-            await new Promise(r => setTimeout(r, 200));
-            targetGrid.appendChild(wrapper);
-            wrapper.style.opacity = '1';
-          } else {
-            // Target area not on this page - just remove card
-            this.fadeOutCard(entityId);
-          }
-          this.cleanupEmptySection(currentGrid);
-        }
-      }
-      // If card not in DOM but entity exists and isn't hidden → was previously hidden, skip
-      // It will appear on next navigation
-    }
-  }
-
-  private async handleAreaChange(event: RegistryChangeEvent): Promise<void> {
-    if (!this.content || !this._hass) return;
-
-    if (event.action === 'remove') {
-      const areaId = event.data?.area_id;
-      if (!areaId) return;
-      const grid = this.content.querySelector(`.area-entities[data-area-id="${areaId}"]`) as HTMLElement;
-      if (grid) {
-        const title = grid.previousElementSibling as HTMLElement;
-        grid.style.transition = 'opacity 0.2s ease';
-        grid.style.opacity = '0';
-        if (title?.classList.contains('area-title')) {
-          title.style.transition = 'opacity 0.2s ease';
-          title.style.opacity = '0';
-        }
-        await new Promise(r => setTimeout(r, 200));
-        grid.remove();
-        if (title?.classList.contains('area-title')) title.remove();
-      }
-      return;
-    }
-
-    if (event.action === 'update') {
-      // Area renamed - update all matching titles
-      try {
-        const areas = await this._hass.callWS({ type: 'config/area_registry/list' });
-        for (const area of areas) {
-          const grid = this.content.querySelector(`.area-entities[data-area-id="${area.area_id}"]`);
-          if (grid) {
-            const title = grid.previousElementSibling;
-            if (title?.classList.contains('area-title')) {
-              const span = title.querySelector('span');
-              if (span && span.textContent !== area.name) {
-                span.textContent = area.name;
-              }
-            }
-          }
-        }
-      } catch {
-        // Silent fail
-      }
-    }
-  }
-
-  private fadeOutCard(entityId: string): void {
-    if (!this.content) return;
-    const wrapper = this.content.querySelector(`.entity-card-wrapper[data-entity-id="${entityId}"]`) as HTMLElement;
-    if (!wrapper) return;
-
-    const parentGrid = wrapper.closest('.area-entities') as HTMLElement;
-
-    // Cleanup the card's resources before removing
-    const card = wrapper.querySelector('apple-home-card') as any;
-    if (card && typeof card.cleanup === 'function') card.cleanup();
-
-    wrapper.style.transition = 'opacity 0.25s ease, transform 0.25s ease';
-    wrapper.style.opacity = '0';
-    wrapper.style.transform = 'scale(0.8)';
-    setTimeout(() => {
-      wrapper.remove();
-      if (parentGrid) this.cleanupEmptySection(parentGrid);
-    }, 250);
-  }
-
-  private cleanupEmptySection(grid: HTMLElement): void {
-    if (!grid || grid.children.length > 0) return;
-    const title = grid.previousElementSibling as HTMLElement;
-    grid.style.transition = 'opacity 0.2s ease';
-    grid.style.opacity = '0';
-    if (title?.classList.contains('area-title')) {
-      title.style.transition = 'opacity 0.2s ease';
-      title.style.opacity = '0';
-    }
-    setTimeout(() => {
-      grid.remove();
-      if (title?.classList.contains('area-title')) title.remove();
-    }, 200);
-  }
-
-  /**
-   * Set up RTL change detection
-   */
-  private setupRTLChangeDetection(): void {
-    this.rtlChangeHandler = (isRTL: boolean, language: string) => {
-      // Handle RTL/language change
-      this.handleRTLChange(isRTL, language);
-    };
-    
-    RTLHelper.addListener(this.rtlChangeHandler);
-  }
-
-  /**
-   * Clean up RTL change detection
-   */
-  private cleanupRTLChangeDetection(): void {
-    if (this.rtlChangeHandler) {
-      RTLHelper.removeListener(this.rtlChangeHandler);
-    }
-    this.rtlChangeHandler = undefined;
-  }
-
-  /**
-   * Handle RTL/language changes
-   */
-  private handleRTLChange(isRTL: boolean, language: string): void {
-    // Update wrapper content direction class
-    if (this.content) {
-      const wrapperContent = this.shadowRoot?.querySelector('.wrapper-content');
-      if (wrapperContent) {
-        wrapperContent.classList.remove('rtl', 'ltr');
-        wrapperContent.classList.add(isRTL ? 'rtl' : 'ltr');
-      }
-    }
-    
-    // Force re-render to update all RTL-dependent UI elements
-    if (this._rendered && !this._isTransitioning) {
-      this._rendered = false;
-      this.renderPage('rtlChange');
-    }
-  }
-
-  async setConfig(config: any) {
-    
-    // Store old config for comparison
-    const oldConfig = this._config;
-    
-    // CRITICAL FIX: Force complete reset on every config change
-    // This prevents state corruption during navigation
-    this._rendered = false;
-    
-    
-    this.config = config;
-
-    // CRITICAL: Always load fresh customizations from storage instead of using config
-    // This ensures we get the latest settings even when navigating between pages
-    if (this._hass) {
-      await this.loadAndApplyCustomizations();
-    } else {
-      // If no hass yet, set the config customizations as fallback
-      await this.customizationManager.setCustomizations(config.customizations || { 
-        home: { sections: { order: [], hidden: [] }, favorites: [], excluded_from_dashboard: [], excluded_from_home: [] }, 
-        pages: {}, 
-        ui: {}, 
-        background: {} 
-      });
-    }
-    
-    this._config = config;
-    
-    // Update header title if available
-    if (this.appleHeader && config.title) {
-      // For room pages, use areaName as title, not config.title
-      const titleToUse = config.pageType === 'room' ? (config.areaName || config.title) : config.title;
-      this.appleHeader.setTitle(titleToUse);
-    } else {
-    }
-    
-    // Smart render: only full re-render if structural changes occurred
-    if (this._hass) {
-      if (this.needsFullRender(oldConfig, config)) {
-        this.renderPage('setConfig-fullRender');
-      } else {
-        // Just update existing components with new config
-        this.updateConfigProperties(config);
-      }
-    }
-  }
-
-  private needsFullRender(oldConfig: any, newConfig: any): boolean {
-    // No old config means first render
-    if (!oldConfig) return true;
-    
-    // Check for structural changes that require full re-render
-    return (
-      oldConfig.pageType !== newConfig.pageType ||
-      oldConfig.areaId !== newConfig.areaId ||
-      oldConfig.areaName !== newConfig.areaName ||
-      oldConfig.deviceGroup !== newConfig.deviceGroup ||
-      oldConfig.activeGroup !== newConfig.activeGroup
-    );
-  }
-
-  private updateConfigProperties(config: any): void {
-    // Update title without full render
-    if (this.appleHeader && config.title !== this.config?.title) {
-      // For room pages, use areaName as title, not config.title
-      const titleToUse = config.pageType === 'room' ? (config.areaName || config.title) : config.title;
-      this.appleHeader.setTitle(titleToUse);
-    }
-    
-    // Update chips active group if changed
-    if (this.chipsElement && config.activeGroup !== this.config?.activeGroup) {
-      this.chipsElement.setActiveGroup(config.activeGroup);
-    }
-    
-    // Update existing cards with new hass if available
-    this.updateExistingCards(this._hass);
-    
-    // Update chips to reflect any config changes
-    this.updateChips();
-  }
-
-  private updateEntityVisibility(entityId: string, isVisible: boolean): void {
-    // Fast DOM manipulation for visibility changes
-    if (this.content) {
-      const cardWrapper = this.content.querySelector(`[data-entity-id="${entityId}"]`);
-      if (cardWrapper) {
-        (cardWrapper as HTMLElement).style.display = isVisible ? '' : 'none';
-      }
-    }
-  }
-
-  private async updateHeaderForConfig() {
-    if (!this.content || !this.config) return;
-    
-    // Remove existing group title (but keep Apple Home header)
-    const existingGroupTitle = this.content.querySelector('.apple-group-title');
-    if (existingGroupTitle) {
-      existingGroupTitle.remove();
-    }
-    
-    // Determine page type for header configuration
-    const isGroupPage = this.config.pageType === 'group';
-    const isSpecialPage = ['room', 'scenes', 'cameras'].includes(this.config.pageType);
-    
-    // Always ensure Apple Home header exists and is properly configured
-    
-    // Configure header based on page type - direct to AppleHeader
-    if (!isGroupPage && !isSpecialPage) {
-      // Home page: configure header for home (show menu, use home title)
-      const homeConfig: HeaderConfig = {
-        title: this.config.title || localize('pages.my_home'),
-        isGroupPage: false,
-        showMenu: true
-      };
-      await this.appleHeader.init(this.content, homeConfig);
-      // Update page content padding after header is initialized
-      this.appleHeader.updatePageContentPadding();
-    } else {
-      // Group/Special pages: configure header (show menu and back button for special pages)
-      let pageTitle = this.config.title || 'Page';
-      let showBackButton = false;
-      
-      // Set appropriate title and back button based on page type
-      if (this.config.pageType === 'room') {
-        // For room pages, use config.title (which should be the room name from apple-home-strategy.ts)
-        // This matches how group pages work - they just use config.title directly
-        pageTitle = this.config.title || localize('pages.default_room');
-        showBackButton = true;
-      } else if (this.config.pageType === 'scenes') {
-        pageTitle = localize('pages.scenes');
-        showBackButton = true;
-      } else if (this.config.pageType === 'cameras') {
-        pageTitle = localize('pages.cameras');
-        showBackButton = true;
-      }
-      
-      const pageConfig: HeaderConfig = {
-        title: pageTitle,
-        isGroupPage: isGroupPage, // Use same styling as group pages
-        isSpecialPage: isSpecialPage, // Add special page flag for immediate scroll header
-        showMenu: !isGroupPage, // Show menu for special pages
-        showBackButton: showBackButton // Show back button for special pages
-      };
-      await this.appleHeader.init(this.content, pageConfig);
-    }
-    
-    // Update page content padding after header is initialized
-    this.appleHeader.updatePageContentPadding();
-    
-    // Always ensure chips are properly configured and connected to header
-    this.ensureChipsConfiguredForHeader();
-  }
-
-  private ensureChipsConfiguredForHeader() {
-    
-    // Only set chips to header if this is a group page
-    const isGroupPage = this.config?.pageType === 'group';
-    const isSpecialPage = ['room', 'scenes', 'cameras'].includes(this.config?.pageType);
-    
-    // Hide chips completely for special pages (room, scenes, cameras)
-    if (isSpecialPage) {
-      this.appleHeader.setChipsElement(null); // Clear header chips for special pages
-      // Also hide the permanent chips container
-      const chipsContainer = this.content?.querySelector('.permanent-chips') as HTMLElement;
-      if (chipsContainer) {
-        chipsContainer.style.display = 'none';
-      }
-      return;
-    }
-    
-    if (!isGroupPage) {
-      this.appleHeader.setChipsElement(null); // Clear header chips for home page
-      // Show chips container for non-special pages
-      const chipsContainer = this.content?.querySelector('.permanent-chips') as HTMLElement;
-      if (chipsContainer) {
-        chipsContainer.style.display = 'block';
-      }
-      return;
-    }
-    
-    // Make sure chips exist and are configured
-    this.ensureChipsExist();
-    
-    // Pass chips to header if they're properly configured (group pages only)
-    if (this.chipsElement && this.chipsElement.isConfigured() && this.chipsElement.hass) {
-      this.appleHeader.setChipsElement(this.chipsElement);
-    } else if (this.chipsElement) {
-      this.configureChips();
-      
-      // Try again after configuration
-      if (this.chipsElement.isConfigured() && this.chipsElement.hass) {
-        this.appleHeader.setChipsElement(this.chipsElement);
-      } else {
-      }
-    } else {
-    }
-  }
-
-  set hass(hass: any) {
-    const oldHass = this._hass;
-    this._hass = hass;
-    
-    // Setup localization with the new hass instance
-    setupLocalize(hass);
-    
-    // Update managers with new hass
-    this.customizationManager.setHass(hass);
-    this.appleHeader.setHass(hass);
-    
-    // Update registry subscription manager with new hass
-    if (this.registrySubscriptionManager) {
-      this.registrySubscriptionManager.setHass(hass);
-    }
-    
-    // Check for RTL/language changes on every hass update
-    const currentLanguage = hass?.locale?.language || hass?.language;
-    if (this._lastLanguage && currentLanguage && this._lastLanguage !== currentLanguage) {
-      // Language changed - check for RTL change
-      RTLHelper.checkForChanges(hass);
-    }
-    this._lastLanguage = currentLanguage;
-    
-    // Only load customizations on first hass set, not on every hass update
-    // This prevents unnecessary re-rendering and title updates on entity state changes
-    const isFirstHassSet = !oldHass;
-    if (isFirstHassSet) {
-      // CRITICAL: Load fresh customizations only on first hass set
-      // This ensures navigation to any page gets the latest excluded entities
-      this.loadAndApplyCustomizations();
-    }
-    
-    // Ensure shadow root exists (but don't recreate if it exists)
-    this.ensureShadowRootExists();
-    
-    // Only render if this is the first time
-    if (!this._rendered) {
-      this.renderPage('setHass-firstTime');
-      this._rendered = true;
-    } else {
-      // Optimized updates: just update existing components with new hass
-      this.updateExistingCards(this._hass);
-      this.updateChips();
-    }
-  }
-
-  private async loadAndApplyCustomizations() {
-    if (!this._hass) return;
-    
-    try {
-      // Load customizations from storage
-      const customizations = await this.customizationManager.loadCustomizations();
-      
-      // Set the loaded customizations
-      await this.customizationManager.setCustomizations(customizations);
-      
-      // Update config with loaded customizations
-      if (this.config) {
-        const oldCustomizations = this.config.customizations;
-        
-        this.config = {
-          ...this.config,
-          customizations: customizations
-        };
-        
-        // If page is already rendered and customizations changed, check if full render is needed
-        // BUT SKIP re-render if we're in edit mode to prevent breaking drag and drop
-        if (this._rendered && JSON.stringify(oldCustomizations) !== JSON.stringify(customizations)) {
-          const isInEditMode = this.editModeManager?.editMode;
-          
-          if (!isInEditMode) {
-            // Check if the changes require a full render or just UI updates
-            const needsFullRender = this.customizationChangesRequireRender(oldCustomizations, customizations);
-            
-            if (needsFullRender) {
-              this._rendered = false;
-              this.renderPage('customizationChange');
-            }
-          }
-        }
-      }
-      
-    } catch (error) {
-      console.error('🏠 APPLE HOME: Error loading customizations:', error);
-    }
-  }
-
-  /**
-   * Check if customization changes require a full page render
-   * vs just UI-only updates (like background, header/sidebar visibility)
-   */
-  private customizationChangesRequireRender(oldCustomizations: any, newCustomizations: any): boolean {
-    // Entity-related changes that require full render
-    const entityChangingKeys = ['home', 'pages'];
-    
-    for (const key of entityChangingKeys) {
-      if (JSON.stringify(oldCustomizations?.[key]) !== JSON.stringify(newCustomizations?.[key])) {
-        return true;
-      }
-    }
-    
-    return false;
-  }
-
-
-  /**
-   * Detect if this is a navigation change vs regular hass update
-   */
-  private isNavigationChange(oldHass: any, newHass: any): boolean {
-    if (!oldHass) return true; // First load
-    
-    // Check if this component needs to render different content
-    // This is more conservative than always re-rendering
-    const hasContent = this.content && this.content.children.length > 0;
-    const hasChips = this.chipsElement && this.chipsElement.isConfigured();
-    
-    // Force recreation if content or chips are missing (indicating navigation)
-    if (!hasContent || !hasChips) {
-      return true;
-    }
-    
-    return false;
-  }
-
-  /**
-   * CRITICAL FIX: Force complete component recreation
-   * This solves navigation state issues by ensuring clean state
-   */
-  private forceCompleteRecreation() {
-    
-    // Reset all state flags
-    this._rendered = false;
-    
-    // Clear chips reference to force recreation
-    if (this.chipsElement) {
-      this.chipsElement = undefined;
-    }
-    
-    // Ensure shadow root is properly initialized
-    this.ensureShadowRootExists();
-    
-    // Remove only dynamic content, keep permanent elements (header, chips) in place
-    if (this.content) {
-      const permanentSelectors = ['.apple-home-header.permanent-header', '.permanent-chips'];
-      Array.from(this.content.children).forEach(child => {
-        const isPermanent = permanentSelectors.some(sel => child.matches(sel));
-        if (!isPermanent) child.remove();
-      });
-
-      const permanentChips = this.content.querySelector('.permanent-chips') as HTMLElement;
-      if (permanentChips) {
-        this.chipsElement = new AppleChips(permanentChips, this.customizationManager);
-        this.setupChipsCallback();
-      }
-    }
-  }
-
-  private async ensureShadowRootExists() {
-    let structureCreated = false;
-    
-    if (!this.shadowRoot) {
-      this.attachShadow({ mode: 'open' });
-    }
-    
-    // Check if HTML structure exists, not just shadow root
-    const wrapperContent = this.shadowRoot!.querySelector('.wrapper-content');
-    if (!wrapperContent) {
-      structureCreated = true;
-      this.shadowRoot!.innerHTML = `
-        <style>
+  private static get styles(): CSSStyleSheet {
+    if (!AppleHomeView._styles) {
+      const sheet = new CSSStyleSheet();
+      sheet.replaceSync(`
           /* ============================================
              Responsive Design System
              ============================================
@@ -1076,7 +260,7 @@ export class AppleHomeView extends HTMLElement {
           /* Ensure edit mode works properly with carousels */
           .carousel-grid .entity-card-wrapper.edit-mode {
             transition: transform 0.2s ease, opacity 0.2s ease;
-            animation: apple-home-shake 1.3s ease-in-out infinite;
+            animation: apple-home-shake 0.25s linear infinite;
             touch-action: none;
           }
 
@@ -1208,7 +392,7 @@ export class AppleHomeView extends HTMLElement {
           
           .entity-card-wrapper.edit-mode {
             transition: transform 0.2s ease, opacity 0.2s ease;
-            animation: apple-home-shake 1.3s ease-in-out infinite;
+            animation: apple-home-shake 0.25s linear infinite;
             touch-action: none; /* Prevent default touch behaviors for drag */
           }
           
@@ -1216,22 +400,32 @@ export class AppleHomeView extends HTMLElement {
           @media (hover: none) and (pointer: coarse) {
             .entity-card-wrapper.edit-mode {
               /* Stronger visual feedback for touch */
-              animation: apple-home-shake 1.8s ease-in-out infinite;
+              animation-duration: 0.3s;
               touch-action: none;
             }
           }
           
           @keyframes apple-home-shake {
-            0%, 100% { transform: translateX(0px) rotate(0deg); }
-            10% { transform: translateX(-1px) rotate(-0.6deg); }
-            20% { transform: translateX(1px) rotate(0.6deg); }
-            30% { transform: translateX(-1px) rotate(-0.6deg); }
-            40% { transform: translateX(1px) rotate(0.6deg); }
-            50% { transform: translateX(-1px) rotate(-0.6deg); }
-            60% { transform: translateX(1px) rotate(0.6deg); }
-            70% { transform: translateX(-1px) rotate(-0.6deg); }
-            80% { transform: translateX(1px) rotate(0.6deg); }
-            90% { transform: translateX(-1px) rotate(-0.6deg); }
+            0% { transform: translate(0, 0) rotate(0deg); }
+            25% { transform: translate(-0.5px, 0.5px) rotate(-0.5deg); }
+            50% { transform: translate(0.5px, -0.2px) rotate(0.5deg); }
+            75% { transform: translate(0.5px, 0.5px) rotate(-0.5deg); }
+            100% { transform: translate(0, 0) rotate(0deg); }
+          }
+          
+          .entity-card-wrapper.edit-mode:nth-child(even) {
+            animation-duration: 0.25s;
+            animation-delay: -0.1s;
+          }
+          
+          .entity-card-wrapper.edit-mode:nth-child(odd) {
+            animation-duration: 0.27s;
+            animation-delay: -0.2s;
+          }
+          
+          .entity-card-wrapper.edit-mode:nth-child(3n) {
+            animation-duration: 0.23s;
+            animation-delay: -0.15s;
           }
           
           /* Drag and drop styles */
@@ -1246,9 +440,10 @@ export class AppleHomeView extends HTMLElement {
           
           /* SortableJS ghost element - the placeholder left behind (empty space indicator) */
           .sortable-ghost {
-            opacity: 0.2 !important;
-            background: rgba(255, 255, 255, 0.05) !important;
+            opacity: 0.15 !important;
+            background: rgba(255, 255, 255, 0.08) !important;
             border-radius: var(--apple-card-radius, 25px) !important;
+            border: 2px dashed rgba(255, 255, 255, 0.15) !important;
             box-shadow: none !important;
           }
           
@@ -1270,13 +465,19 @@ export class AppleHomeView extends HTMLElement {
           /* SortableJS fallback element - the floating clone that follows cursor/touch */
           .sortable-fallback {
             position: fixed !important;
-            opacity: 1 !important;
-            box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5) !important;
-            transform: scale(1.05) rotate(2deg) !important;
+            opacity: 0.92 !important;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.45), 0 8px 20px rgba(0, 0, 0, 0.3) !important;
+            transform: scale(1.06) rotate(1.5deg) !important;
             border-radius: var(--apple-card-radius, 25px) !important;
             z-index: 100000 !important;
             pointer-events: none !important;
             transition: none !important;
+          }
+          
+          /* Hide controls on dragging element */
+          .sortable-fallback .entity-controls,
+          .sortable-fallback .entity-hide-btn {
+            display: none !important;
           }
           
           /* Smooth transitions for cards making room during drag operations */
@@ -1396,6 +597,42 @@ export class AppleHomeView extends HTMLElement {
           .entity-control-btn.tall-toggle.active {
             background: rgba(255, 255, 255, 0.9);
             color: #666;
+          }
+          
+          /* Apple-style minus button (top-left) for hiding cards */
+          .entity-hide-btn {
+            position: absolute;
+            top: -6px;
+            left: -6px;
+            display: none;
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            background: rgba(255, 59, 48, 0.9) !important;
+            color: white !important;
+            border: 2px solid rgba(255, 255, 255, 0.85);
+            cursor: pointer;
+            z-index: 11;
+            align-items: center;
+            justify-content: center;
+            padding: 0;
+            box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
+            transition: transform 0.15s ease;
+          }
+          
+          .entity-hide-btn ha-icon {
+            --mdc-icon-size: 14px;
+            color: white;
+          }
+          
+          .entity-hide-btn:active {
+            transform: scale(0.85);
+          }
+          
+          :host(.edit-mode) .entity-hide-btn,
+          .edit-mode .entity-hide-btn,
+          .entity-card-wrapper.edit-mode .entity-hide-btn {
+            display: flex !important;
           }
           
           .entity-card-wrapper.tall {
@@ -1940,7 +1177,861 @@ export class AppleHomeView extends HTMLElement {
              font-weight: 600;
              letter-spacing: 0.2px;
           }
-        </style>
+        `);
+      AppleHomeView._styles = sheet;
+    }
+    return AppleHomeView._styles;
+  }
+
+  // Dashboard-specific management - keyed by dashboard URL base
+  private static dashboardActiveInstances = new Map<string, AppleHomeView>();
+  private static dashboardStateListeners = new Map<string, (isActive: boolean) => void>();
+
+  private config?: any;
+  private _hass?: any;
+  private _config?: any;
+  private content?: HTMLElement;
+  private _isIpadMode = false;
+  private _rendered = false;
+  private _isTransitioning = false; // Add transition state
+  private _lastRenderTime = 0; // Track when last render happened
+  private _modeSwitchDebounce: number | null = null; // Prevent rapid mode switching
+  private chipsElement?: AppleChips;
+  private visibilityChangeHandler?: () => void; // Add visibility change handler
+  private globalRefreshHandler?: (event: Event) => void; // Add global refresh handler
+  private currentDashboardKey: string = 'default'; // Track current dashboard key
+  private _updateRequest: number | null = null; // Track frame update request
+
+  // iPad Mode Properties
+  private sidebarElement?: AppleSidebar;
+  private isSidebarCollapsed: boolean = false;
+  private resizeObserver?: ResizeObserver;
+  private sidebarToggleHandler?: (e: Event) => void;
+  private backgroundManager!: BackgroundManager;
+
+  // Registry subscription handlers for automatic updates
+  private registrySubscriptionManager?: RegistrySubscriptionManager;
+  private registryChangeHandler?: RegistryChangeCallback;
+  private rtlChangeHandler?: (isRTL: boolean, language: string) => void;
+  private _lastLanguage?: string; // Track language for change detection
+
+  // Helper methods for dashboard-specific management
+  private getDashboardKey(): string {
+    // Extract dashboard key directly from URL (independent method)
+    const currentPath = window.location.pathname;
+    const dashboardMatch = currentPath.match(/\/([^\/]+)/);
+    return dashboardMatch && dashboardMatch[1] ? dashboardMatch[1] : 'default';
+  }
+
+  private getCurrentActiveInstance(): AppleHomeView | undefined {
+    return AppleHomeView.dashboardActiveInstances.get(this.currentDashboardKey);
+  }
+
+  private setCurrentActiveInstance(instance: AppleHomeView | undefined): void {
+    if (instance) {
+      AppleHomeView.dashboardActiveInstances.set(this.currentDashboardKey, instance);
+    } else {
+      AppleHomeView.dashboardActiveInstances.delete(this.currentDashboardKey);
+    }
+  }
+
+  // Page renderers
+  private homePage: HomePage;
+  private groupPage: GroupPage;
+  private roomPage: RoomPage;
+  private scenesPage: ScenesPage;
+  private camerasPage: CamerasPage;
+
+  // Managers
+  private customizationManager: CustomizationManager;
+  private cardManager: CardManager;
+  private editModeManager: EditModeManager;
+  private appleHeader: AppleHeader;
+  private refreshCallback: () => void;
+  private dragAndDropManager: DragAndDropManager;
+
+  constructor() {
+    super();
+
+    // Initialize dashboard key for this instance
+    this.currentDashboardKey = this.getDashboardKey();
+
+    // Initialize callbacks
+    this.refreshCallback = () => this.refreshDashboard();
+
+    // Initialize managers as instance-specific but use singleton for customization
+    this.customizationManager = CustomizationManager.getInstance();
+    this.backgroundManager = new BackgroundManager(this.customizationManager);
+    this.cardManager = new CardManager(this.customizationManager);
+    this.editModeManager = new EditModeManager((editMode) => this.handleEditModeChange(editMode));
+
+    // Create instance-specific header (NO SINGLETON!) and pass editModeManager
+    this.appleHeader = new AppleHeader(true);
+    this.appleHeader.setEditModeManager(this.editModeManager);
+    this.appleHeader.addRefreshCallback(this.refreshCallback);
+
+    this.dragAndDropManager = new DragAndDropManager(
+      (areaId: string) => this.handleSaveCurrentOrder(areaId),
+      this.customizationManager,
+      'home' // Use home context for home page
+    );
+
+    // Initialize page renderers
+    this.homePage = new HomePage();
+    this.groupPage = new GroupPage();
+    this.roomPage = new RoomPage();
+    this.scenesPage = new ScenesPage();
+    this.camerasPage = new CamerasPage();
+
+    // Set up header manager dependencies
+    this.appleHeader.setCustomizationManager(this.customizationManager);
+
+  }
+
+  connectedCallback() {
+    // Create and store visibility change handler to pause cameras when hidden
+    this.visibilityChangeHandler = () => {
+      if (document.hidden) {
+        // Pause all cameras when page becomes hidden
+        this.pauseCameras();
+      } else {
+        // Resume cameras when page becomes visible
+        this.resumeCameras();
+      }
+    };
+    document.addEventListener('visibilitychange', this.visibilityChangeHandler);
+
+    // Create and store global refresh handler
+    this.globalRefreshHandler = (event: Event) => {
+      const customEvent = event as CustomEvent;
+      // Only refresh if we have hass and this is a different customization update
+      if (this._hass && customEvent.detail?.customizations) {
+        this.handleGlobalRefresh(customEvent.detail.customizations);
+      }
+    };
+    document.addEventListener('apple-home-dashboard-refresh', this.globalRefreshHandler);
+
+    // Listen for sidebar toggle events from the header's "open sidebar" button
+    this.sidebarToggleHandler = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+
+      if (detail?.toggle) {
+        // Toggle based on current state
+        this.isSidebarCollapsed = !this.isSidebarCollapsed;
+      } else if (detail?.open !== undefined) {
+        // Force specific state
+        this.isSidebarCollapsed = !detail.open;
+      }
+
+      if (this.isSidebarCollapsed) {
+        this.classList.add('sidebar-collapsed');
+      } else {
+        this.classList.remove('sidebar-collapsed');
+      }
+
+      // Dispatch state change for header visibility if needed
+      document.dispatchEvent(new CustomEvent('apple-sidebar-state-changed', {
+        detail: { collapsed: this.isSidebarCollapsed }
+      }));
+    };
+    this.addEventListener('apple-sidebar-toggled', this.sidebarToggleHandler);
+    // Also listen on document for events that bubble from header container
+    document.addEventListener('apple-sidebar-toggled', this.sidebarToggleHandler);
+
+    // Listen for entity hide events from edit mode
+    this.addEventListener('apple-home-hide-entity', ((e: CustomEvent) => {
+      this.handleHideEntity(e.detail.entityId, e.detail.areaId);
+    }) as EventListener);
+
+    // Set up registry subscription manager for automatic updates
+    this.setupRegistrySubscriptions();
+
+    // Set up RTL change detection
+    this.setupRTLChangeDetection();
+
+    // Note: Dashboard registration is handled by the strategy when it generates the dashboard
+    // The DashboardStateManager tracks which dashboards are Apple Home dashboards
+
+    // CRITICAL: Set this as the active instance for this dashboard
+    this.setCurrentActiveInstance(this);
+
+  }
+
+  disconnectedCallback() {
+    // Clean up event listeners
+    if (this.visibilityChangeHandler) {
+      document.removeEventListener('visibilitychange', this.visibilityChangeHandler);
+    }
+    if (this.globalRefreshHandler) {
+      document.removeEventListener('apple-home-dashboard-refresh', this.globalRefreshHandler);
+    }
+    if (this.sidebarToggleHandler) {
+      this.removeEventListener('apple-sidebar-toggled', this.sidebarToggleHandler);
+      document.removeEventListener('apple-sidebar-toggled', this.sidebarToggleHandler);
+    }
+
+    // Clean up registry subscription handlers
+    this.cleanupRegistrySubscriptions();
+
+    // Clean up RTL change detection
+    this.cleanupRTLChangeDetection();
+
+    // Cancel any pending update request
+    if (this._updateRequest) {
+      cancelAnimationFrame(this._updateRequest);
+      this._updateRequest = null;
+    }
+
+    // Clean up instance-specific header callbacks
+    if (this.refreshCallback) {
+      this.appleHeader.removeRefreshCallback(this.refreshCallback);
+    }
+
+    // Clean up managers and their resources
+    if (this.dragAndDropManager) {
+      this.dragAndDropManager.disableDragAndDrop(this.content!);
+    }
+
+    // Clear active instance reference if this is the active one for this dashboard
+    if (this.getCurrentActiveInstance() === this) {
+      this.setCurrentActiveInstance(undefined);
+    }
+
+    // Clean up all camera managers in the current content
+    this.cleanupCameras();
+
+    // Note: We don't manually set dashboard inactive here
+    // The DashboardStateManager handles this automatically via URL change detection
+  }
+
+  private async handleHideEntity(entityId: string, areaId?: string) {
+    if (!entityId) return;
+    
+    if (areaId === 'favorites') {
+      // Remove from favorites
+      await this.customizationManager.removeFavorite(entityId);
+    } else {
+      // Hide from home customization
+      await this.customizationManager.hideEntityFromHome(entityId);
+    }
+    
+    // Animate removal
+    this.fadeOutCard(entityId);
+  }
+
+  private async handleGlobalRefresh(customizations: any) {
+    try {
+      // Update the customization manager with fresh data
+      await this.customizationManager.setCustomizations(customizations);
+
+      // Update config with fresh customizations
+      this.config = {
+        ...this.config,
+        customizations: customizations
+      };
+
+      // Apply changes immediately if not already rendered by customization changes
+      this._rendered = false;
+      await this.renderPage('globalRefresh');
+
+    } catch (error) {
+      console.error('🏠 APPLE HOME: Error during global refresh:', error);
+    }
+  }
+
+  /**
+   * Set up registry subscription manager for automatic updates
+   * This handles: entity area changes, device moves, entity hide/delete/disable
+   */
+  private setupRegistrySubscriptions(): void {
+    this.registrySubscriptionManager = RegistrySubscriptionManager.getInstance();
+
+    // Create the handler for registry changes
+    this.registryChangeHandler = (event) => {
+      if (this.editModeManager?.editMode) return;
+      this.handleRegistryChange(event);
+    };
+
+    this.registrySubscriptionManager.addListener(this.registryChangeHandler);
+
+    // Initialize with hass if available
+    if (this._hass) {
+      this.registrySubscriptionManager.setHass(this._hass);
+    }
+  }
+
+  /**
+   * Clean up registry subscriptions
+   */
+  private cleanupRegistrySubscriptions(): void {
+    if (this.registryChangeHandler && this.registrySubscriptionManager) {
+      this.registrySubscriptionManager.removeListener(this.registryChangeHandler);
+    }
+    this.registryChangeHandler = undefined;
+  }
+
+  /**
+   * Handle registry changes with surgical DOM updates - no full page rebuilds.
+   */
+  private async handleRegistryChange(event: RegistryChangeEvent): Promise<void> {
+    if (!this._rendered || this._isTransitioning || !this._hass || !this.content) return;
+
+    switch (event.type) {
+      case 'entity':
+        await this.handleEntityChange(event);
+        break;
+      case 'area':
+        await this.handleAreaChange(event);
+        break;
+      case 'device':
+        // Device area changes affect entities on that device.
+        // The entity registry events will fire separately for those, so no action needed here.
+        break;
+    }
+  }
+
+  private async handleEntityChange(event: RegistryChangeEvent): Promise<void> {
+    const entityId = event.data?.entity_id;
+    if (!entityId || !this.content || !this._hass) return;
+
+    if (event.action === 'remove') {
+      this.fadeOutCard(entityId);
+      return;
+    }
+
+    // For create/update, check current entity registry state from hass
+    const entityReg = this._hass.entities?.[entityId];
+
+    if (event.action === 'update' && entityReg) {
+      // Entity hidden or disabled → fade out
+      if (entityReg.hidden_by || entityReg.disabled_by) {
+        this.fadeOutCard(entityId);
+        return;
+      }
+
+      // Check if entity moved areas
+      const newAreaId = entityReg.area_id
+        || (entityReg.device_id ? this._hass.devices?.[entityReg.device_id]?.area_id : null)
+        || 'no_area';
+
+      const wrapper = this.content.querySelector(`.entity-card-wrapper[data-entity-id="${entityId}"]`) as HTMLElement;
+      if (wrapper) {
+        const currentGrid = wrapper.closest('.area-entities') as HTMLElement;
+        const currentAreaId = currentGrid?.dataset?.areaId;
+
+        if (currentAreaId && currentAreaId !== newAreaId) {
+          // Entity moved to a different area
+          const targetGrid = this.content.querySelector(`.area-entities[data-area-id="${newAreaId}"]`) as HTMLElement;
+          if (targetGrid) {
+            // Move card to the target area grid
+            wrapper.style.transition = 'opacity 0.2s ease';
+            wrapper.style.opacity = '0';
+            await new Promise(r => setTimeout(r, 200));
+            targetGrid.appendChild(wrapper);
+            wrapper.style.opacity = '1';
+          } else {
+            // Target area not on this page - just remove card
+            this.fadeOutCard(entityId);
+          }
+          this.cleanupEmptySection(currentGrid);
+        }
+      }
+      // If card not in DOM but entity exists and isn't hidden → was previously hidden, skip
+      // It will appear on next navigation
+    }
+  }
+
+  private async handleAreaChange(event: RegistryChangeEvent): Promise<void> {
+    if (!this.content || !this._hass) return;
+
+    if (event.action === 'remove') {
+      const areaId = event.data?.area_id;
+      if (!areaId) return;
+      const grid = this.content.querySelector(`.area-entities[data-area-id="${areaId}"]`) as HTMLElement;
+      if (grid) {
+        const title = grid.previousElementSibling as HTMLElement;
+        grid.style.transition = 'opacity 0.2s ease';
+        grid.style.opacity = '0';
+        if (title?.classList.contains('area-title')) {
+          title.style.transition = 'opacity 0.2s ease';
+          title.style.opacity = '0';
+        }
+        await new Promise(r => setTimeout(r, 200));
+        grid.remove();
+        if (title?.classList.contains('area-title')) title.remove();
+      }
+      return;
+    }
+
+    if (event.action === 'update') {
+      // Area renamed - update all matching titles
+      try {
+        const areas = await this._hass.callWS({ type: 'config/area_registry/list' });
+        for (const area of areas) {
+          const grid = this.content.querySelector(`.area-entities[data-area-id="${area.area_id}"]`);
+          if (grid) {
+            const title = grid.previousElementSibling;
+            if (title?.classList.contains('area-title')) {
+              const span = title.querySelector('span');
+              if (span && span.textContent !== area.name) {
+                span.textContent = area.name;
+              }
+            }
+          }
+        }
+      } catch {
+        // Silent fail
+      }
+    }
+  }
+
+  private fadeOutCard(entityId: string): void {
+    if (!this.content) return;
+    const wrapper = this.content.querySelector(`.entity-card-wrapper[data-entity-id="${entityId}"]`) as HTMLElement;
+    if (!wrapper) return;
+
+    const parentGrid = wrapper.closest('.area-entities') as HTMLElement;
+
+    // Cleanup the card's resources before removing
+    const card = wrapper.querySelector('apple-home-card') as any;
+    if (card && typeof card.cleanup === 'function') card.cleanup();
+
+    wrapper.style.transition = 'opacity 0.25s ease, transform 0.25s ease';
+    wrapper.style.opacity = '0';
+    wrapper.style.transform = 'scale(0.8)';
+    setTimeout(() => {
+      wrapper.remove();
+      if (parentGrid) this.cleanupEmptySection(parentGrid);
+    }, 250);
+  }
+
+  private cleanupEmptySection(grid: HTMLElement): void {
+    if (!grid || grid.children.length > 0) return;
+    const title = grid.previousElementSibling as HTMLElement;
+    grid.style.transition = 'opacity 0.2s ease';
+    grid.style.opacity = '0';
+    if (title?.classList.contains('area-title')) {
+      title.style.transition = 'opacity 0.2s ease';
+      title.style.opacity = '0';
+    }
+    setTimeout(() => {
+      grid.remove();
+      if (title?.classList.contains('area-title')) title.remove();
+    }, 200);
+  }
+
+  /**
+   * Set up RTL change detection
+   */
+  private setupRTLChangeDetection(): void {
+    this.rtlChangeHandler = (isRTL: boolean, language: string) => {
+      // Handle RTL/language change
+      this.handleRTLChange(isRTL, language);
+    };
+
+    RTLHelper.addListener(this.rtlChangeHandler);
+  }
+
+  /**
+   * Clean up RTL change detection
+   */
+  private cleanupRTLChangeDetection(): void {
+    if (this.rtlChangeHandler) {
+      RTLHelper.removeListener(this.rtlChangeHandler);
+    }
+    this.rtlChangeHandler = undefined;
+  }
+
+  /**
+   * Handle RTL/language changes
+   */
+  private handleRTLChange(isRTL: boolean, language: string): void {
+    // Update wrapper content direction class
+    if (this.content) {
+      const wrapperContent = this.shadowRoot?.querySelector('.wrapper-content');
+      if (wrapperContent) {
+        wrapperContent.classList.remove('rtl', 'ltr');
+        wrapperContent.classList.add(isRTL ? 'rtl' : 'ltr');
+      }
+    }
+
+    // Force re-render to update all RTL-dependent UI elements
+    if (this._rendered && !this._isTransitioning) {
+      this._rendered = false;
+      this.renderPage('rtlChange');
+    }
+  }
+
+  async setConfig(config: any) {
+
+    // Store old config for comparison
+    const oldConfig = this._config;
+
+    // CRITICAL FIX: Force complete reset on every config change
+    // This prevents state corruption during navigation
+    this._rendered = false;
+
+
+    this.config = config;
+
+    // CRITICAL: Always load fresh customizations from storage instead of using config
+    // This ensures we get the latest settings even when navigating between pages
+    if (this._hass) {
+      await this.loadAndApplyCustomizations();
+    } else {
+      // If no hass yet, set the config customizations as fallback
+      await this.customizationManager.setCustomizations(config.customizations || {
+        home: { sections: { order: [], hidden: [] }, favorites: [], excluded_from_dashboard: [], excluded_from_home: [] },
+        pages: {},
+        ui: {},
+        background: {}
+      });
+    }
+
+    this._config = config;
+
+    // Update header title if available
+    if (this.appleHeader && config.title) {
+      // For room pages, use areaName as title, not config.title
+      const titleToUse = config.pageType === 'room' ? (config.areaName || config.title) : config.title;
+      this.appleHeader.setTitle(titleToUse);
+    } else {
+    }
+
+    // Smart render: only full re-render if structural changes occurred
+    if (this._hass) {
+      if (this.needsFullRender(oldConfig, config)) {
+        this.renderPage('setConfig-fullRender');
+      } else {
+        // Just update existing components with new config
+        this.updateConfigProperties(config);
+      }
+    }
+  }
+
+  private needsFullRender(oldConfig: any, newConfig: any): boolean {
+    // No old config means first render
+    if (!oldConfig) return true;
+
+    // Check for structural changes that require full re-render
+    return (
+      oldConfig.pageType !== newConfig.pageType ||
+      oldConfig.areaId !== newConfig.areaId ||
+      oldConfig.areaName !== newConfig.areaName ||
+      oldConfig.deviceGroup !== newConfig.deviceGroup ||
+      oldConfig.activeGroup !== newConfig.activeGroup
+    );
+  }
+
+  private updateConfigProperties(config: any): void {
+    // Update title without full render
+    if (this.appleHeader && config.title !== this.config?.title) {
+      // For room pages, use areaName as title, not config.title
+      const titleToUse = config.pageType === 'room' ? (config.areaName || config.title) : config.title;
+      this.appleHeader.setTitle(titleToUse);
+    }
+
+    // Update chips active group if changed
+    if (this.chipsElement && config.activeGroup !== this.config?.activeGroup) {
+      this.chipsElement.setActiveGroup(config.activeGroup);
+    }
+
+    // Update existing cards with new hass if available
+    this.updateExistingCards(this._hass);
+
+    // Update chips to reflect any config changes
+    this.updateChips();
+  }
+
+  private updateEntityVisibility(entityId: string, isVisible: boolean): void {
+    // Fast DOM manipulation for visibility changes
+    if (this.content) {
+      const cardWrapper = this.content.querySelector(`[data-entity-id="${entityId}"]`);
+      if (cardWrapper) {
+        (cardWrapper as HTMLElement).style.display = isVisible ? '' : 'none';
+      }
+    }
+  }
+
+  private async updateHeaderForConfig() {
+    if (!this.content || !this.config) return;
+
+    // Remove existing group title (but keep Apple Home header)
+    const existingGroupTitle = this.content.querySelector('.apple-group-title');
+    if (existingGroupTitle) {
+      existingGroupTitle.remove();
+    }
+
+    // Determine page type for header configuration
+    const isGroupPage = this.config.pageType === 'group';
+    const isSpecialPage = ['room', 'scenes', 'cameras'].includes(this.config.pageType);
+
+    // Always ensure Apple Home header exists and is properly configured
+
+    // Configure header based on page type - direct to AppleHeader
+    if (!isGroupPage && !isSpecialPage) {
+      // Home page: configure header for home (show menu, use home title)
+      const homeConfig: HeaderConfig = {
+        title: this.config.title || localize('pages.my_home'),
+        isGroupPage: false,
+        showMenu: true
+      };
+      await this.appleHeader.init(this.content, homeConfig);
+      // Update page content padding after header is initialized
+      this.appleHeader.updatePageContentPadding();
+    } else {
+      // Group/Special pages: configure header (show menu and back button for special pages)
+      let pageTitle = this.config.title || 'Page';
+      let showBackButton = false;
+
+      // Set appropriate title and back button based on page type
+      if (this.config.pageType === 'room') {
+        // For room pages, use config.title (which should be the room name from apple-home-strategy.ts)
+        // This matches how group pages work - they just use config.title directly
+        pageTitle = this.config.title || localize('pages.default_room');
+        showBackButton = true;
+      } else if (this.config.pageType === 'scenes') {
+        pageTitle = localize('pages.scenes');
+        showBackButton = true;
+      } else if (this.config.pageType === 'cameras') {
+        pageTitle = localize('pages.cameras');
+        showBackButton = true;
+      }
+
+      const pageConfig: HeaderConfig = {
+        title: pageTitle,
+        isGroupPage: isGroupPage, // Use same styling as group pages
+        isSpecialPage: isSpecialPage, // Add special page flag for immediate scroll header
+        showMenu: !isGroupPage, // Show menu for special pages
+        showBackButton: showBackButton // Show back button for special pages
+      };
+      await this.appleHeader.init(this.content, pageConfig);
+    }
+
+    // Update page content padding after header is initialized
+    this.appleHeader.updatePageContentPadding();
+
+    // Always ensure chips are properly configured and connected to header
+    this.ensureChipsConfiguredForHeader();
+  }
+
+  private ensureChipsConfiguredForHeader() {
+
+    // Only set chips to header if this is a group page
+    const isGroupPage = this.config?.pageType === 'group';
+    const isSpecialPage = ['room', 'scenes', 'cameras'].includes(this.config?.pageType);
+
+    // Hide chips completely for special pages (room, scenes, cameras)
+    if (isSpecialPage) {
+      this.appleHeader.setChipsElement(null); // Clear header chips for special pages
+      // Also hide the permanent chips container
+      const chipsContainer = this.content?.querySelector('.permanent-chips') as HTMLElement;
+      if (chipsContainer) {
+        chipsContainer.style.display = 'none';
+      }
+      return;
+    }
+
+    if (!isGroupPage) {
+      this.appleHeader.setChipsElement(null); // Clear header chips for home page
+      // Show chips container for non-special pages
+      const chipsContainer = this.content?.querySelector('.permanent-chips') as HTMLElement;
+      if (chipsContainer) {
+        chipsContainer.style.display = 'block';
+      }
+      return;
+    }
+
+    // Make sure chips exist and are configured
+    this.ensureChipsExist();
+
+    // Pass chips to header if they're properly configured (group pages only)
+    if (this.chipsElement && this.chipsElement.isConfigured() && this.chipsElement.hass) {
+      this.appleHeader.setChipsElement(this.chipsElement);
+    } else if (this.chipsElement) {
+      this.configureChips();
+
+      // Try again after configuration
+      if (this.chipsElement.isConfigured() && this.chipsElement.hass) {
+        this.appleHeader.setChipsElement(this.chipsElement);
+      } else {
+      }
+    } else {
+    }
+  }
+
+  set hass(hass: any) {
+    const oldHass = this._hass;
+    this._hass = hass;
+
+    // Setup localization with the new hass instance
+    setupLocalize(hass);
+
+    // Update managers with new hass
+    this.customizationManager.setHass(hass);
+    this.appleHeader.setHass(hass);
+
+    // Update registry subscription manager with new hass
+    if (this.registrySubscriptionManager) {
+      this.registrySubscriptionManager.setHass(hass);
+    }
+
+    // Check for RTL/language changes on every hass update
+    const currentLanguage = hass?.locale?.language || hass?.language;
+    if (this._lastLanguage && currentLanguage && this._lastLanguage !== currentLanguage) {
+      // Language changed - check for RTL change
+      RTLHelper.checkForChanges(hass);
+    }
+    this._lastLanguage = currentLanguage;
+
+    // Only load customizations on first hass set, not on every hass update
+    // This prevents unnecessary re-rendering and title updates on entity state changes
+    const isFirstHassSet = !oldHass;
+    if (isFirstHassSet) {
+      // CRITICAL: Load fresh customizations only on first hass set
+      // This ensures navigation to any page gets the latest excluded entities
+      this.loadAndApplyCustomizations();
+    }
+
+    // Ensure shadow root exists (but don't recreate if it exists)
+    this.ensureShadowRootExists();
+
+    // Only render if this is the first time
+    if (!this._rendered) {
+      this.renderPage('setHass-firstTime');
+      this._rendered = true;
+    } else {
+      // Optimized updates: just update existing components with new hass
+      this.updateExistingCards(this._hass);
+      this.updateChips();
+    }
+  }
+
+  private async loadAndApplyCustomizations() {
+    if (!this._hass) return;
+
+    try {
+      // Load customizations from storage
+      const customizations = await this.customizationManager.loadCustomizations();
+
+      // Set the loaded customizations
+      await this.customizationManager.setCustomizations(customizations);
+
+      // Update config with loaded customizations
+      if (this.config) {
+        const oldCustomizations = this.config.customizations;
+
+        this.config = {
+          ...this.config,
+          customizations: customizations
+        };
+
+        // If page is already rendered and customizations changed, check if full render is needed
+        // BUT SKIP re-render if we're in edit mode to prevent breaking drag and drop
+        if (this._rendered && JSON.stringify(oldCustomizations) !== JSON.stringify(customizations)) {
+          const isInEditMode = this.editModeManager?.editMode;
+
+          if (!isInEditMode) {
+            // Check if the changes require a full render or just UI updates
+            const needsFullRender = this.customizationChangesRequireRender(oldCustomizations, customizations);
+
+            if (needsFullRender) {
+              this._rendered = false;
+              this.renderPage('customizationChange');
+            }
+          }
+        }
+      }
+
+    } catch (error) {
+      console.error('🏠 APPLE HOME: Error loading customizations:', error);
+    }
+  }
+
+  /**
+   * Check if customization changes require a full page render
+   * vs just UI-only updates (like background, header/sidebar visibility)
+   */
+  private customizationChangesRequireRender(oldCustomizations: any, newCustomizations: any): boolean {
+    // Entity-related changes that require full render
+    const entityChangingKeys = ['home', 'pages'];
+
+    for (const key of entityChangingKeys) {
+      if (JSON.stringify(oldCustomizations?.[key]) !== JSON.stringify(newCustomizations?.[key])) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+
+  /**
+   * Detect if this is a navigation change vs regular hass update
+   */
+  private isNavigationChange(oldHass: any, newHass: any): boolean {
+    if (!oldHass) return true; // First load
+
+    // Check if this component needs to render different content
+    // This is more conservative than always re-rendering
+    const hasContent = this.content && this.content.children.length > 0;
+    const hasChips = this.chipsElement && this.chipsElement.isConfigured();
+
+    // Force recreation if content or chips are missing (indicating navigation)
+    if (!hasContent || !hasChips) {
+      return true;
+    }
+
+    return false;
+  }
+
+  /**
+   * CRITICAL FIX: Force complete component recreation
+   * This solves navigation state issues by ensuring clean state
+   */
+  private forceCompleteRecreation() {
+
+    // Reset all state flags
+    this._rendered = false;
+
+    // Clear chips reference to force recreation
+    if (this.chipsElement) {
+      this.chipsElement = undefined;
+    }
+
+    // Ensure shadow root is properly initialized
+    this.ensureShadowRootExists();
+
+    // Remove only dynamic content, keep permanent elements (header, chips) in place
+    if (this.content) {
+      const permanentSelectors = ['.apple-home-header.permanent-header', '.permanent-chips'];
+      Array.from(this.content.children).forEach(child => {
+        const isPermanent = permanentSelectors.some(sel => child.matches(sel));
+        if (!isPermanent) child.remove();
+      });
+
+      const permanentChips = this.content.querySelector('.permanent-chips') as HTMLElement;
+      if (permanentChips) {
+        this.chipsElement = new AppleChips(permanentChips, this.customizationManager);
+        this.setupChipsCallback();
+      }
+    }
+  }
+
+  private async ensureShadowRootExists() {
+    let structureCreated = false;
+
+    if (!this.shadowRoot) {
+      this.attachShadow({ mode: 'open' });
+      this.shadowRoot.adoptedStyleSheets = [AppleHomeView.styles];
+    }
+
+    // Check if HTML structure exists, not just shadow root
+    const wrapperContent = this.shadowRoot!.querySelector('.wrapper-content');
+    if (!wrapperContent) {
+      structureCreated = true;
+      this.shadowRoot!.innerHTML = `
+        
         <div class="wrapper-content ${RTLHelper.isRTL() ? 'rtl' : 'ltr'}">
           <div class="page-content">
             <div class="apple-home-header permanent-header"></div>
@@ -1951,12 +2042,12 @@ export class AppleHomeView extends HTMLElement {
         <div class="sidebar-container" style="display: none;"></div>
       `;
     }
-    
+
     // Handle Background first
     const isMobileView = this.customizationManager.isMobileViewActive();
     const isIpadMode = this.customizationManager.isIpadModeActive();
     this.backgroundManager.applyBackgroundOnly(this.backgroundManager.getCurrentBackground());
-    
+
     // Apply layout classes to host
     if (isMobileView) {
       this.classList.add('is-mobile-view');
@@ -1967,7 +2058,7 @@ export class AppleHomeView extends HTMLElement {
     } else {
       this.classList.remove('is-mobile-view', 'is-ipad-mode');
     }
-    
+
     // ==========================================
     // IPAD MODE RENDERING
     // ==========================================
@@ -1975,22 +2066,22 @@ export class AppleHomeView extends HTMLElement {
       const sidebarContainer = this.shadowRoot!.querySelector('.sidebar-container') as HTMLElement;
       if (sidebarContainer) {
         sidebarContainer.style.display = 'block';
-        
+
         // Initialize Sidebar if not created
         if (!this.sidebarElement) {
           this.sidebarElement = new AppleSidebar(sidebarContainer);
-          
+
           // Toggle sidebar visibility on close button click
           this.sidebarElement.setOnClose(() => {
             this.isSidebarCollapsed = true;
             this.classList.add('sidebar-collapsed');
-            
+
             // Notify header so it can show the "open sidebar" button
             document.dispatchEvent(new CustomEvent('apple-sidebar-state-changed', {
               detail: { collapsed: true }
             }));
           });
-          
+
           // Listen for re-open from header
           document.addEventListener('apple-sidebar-toggled', () => {
             this.isSidebarCollapsed = false;
@@ -2000,14 +2091,14 @@ export class AppleHomeView extends HTMLElement {
               detail: { collapsed: false }
             }));
           });
-          
+
           // Optional: react to navigation from sidebar
           this.sidebarElement.setOnNavigate((path: string) => {
             // The sidebar handles navigation itself via pushState,
             // but we can use this hook for additional effects if needed
           });
         }
-        
+
         // Update hass reference (smart-render inside sidebar prevents scroll jump)
         this.sidebarElement.hass = this._hass;
       }
@@ -2019,13 +2110,13 @@ export class AppleHomeView extends HTMLElement {
       // Clean up sidebar reference when leaving iPad mode
       this.sidebarElement = undefined;
     }
-    
+
     if (isMobileView) {
       const barContainer = this.shadowRoot!.querySelector('.bottom-indicator-bar-container');
       if (barContainer) {
         const pageType = this.config?.pageType;
         const isAutomationPage = pageType === 'scenes' || pageType === 'cameras';
-        
+
         if (!barContainer.querySelector('.bottom-indicator-bar')) {
           barContainer.innerHTML = `
             <div class="bottom-indicator-bar">
@@ -2039,7 +2130,7 @@ export class AppleHomeView extends HTMLElement {
               </div>
             </div>
           `;
-          
+
           const getBasePath = () => {
             const path = window.location.pathname;
             const parts = path.split('/').filter(p => p.length > 0);
@@ -2054,7 +2145,7 @@ export class AppleHomeView extends HTMLElement {
               window.dispatchEvent(new Event('location-changed', { bubbles: true, composed: true }));
             }
           });
-          
+
           barContainer.querySelector('#nav-automation')?.addEventListener('click', (e) => {
             e.preventDefault();
             const newUrl = getBasePath() + 'scenes';
@@ -2082,7 +2173,7 @@ export class AppleHomeView extends HTMLElement {
 
     // Always ensure we have the references after HTML structure exists
     this.content = this.shadowRoot!.querySelector('.page-content') as HTMLElement;
-    
+
     // Only update chips reference if we don't have one or if it's not connected
     if (!this.chipsElement) {
       const chipsContainer = this.content.querySelector('.permanent-chips') as HTMLElement;
@@ -2092,7 +2183,7 @@ export class AppleHomeView extends HTMLElement {
       } else {
       }
     }
-    
+
     // Only initialize header when structure is created for the first time
     // This prevents repeated header initialization calls
     if (structureCreated) {
@@ -2101,28 +2192,59 @@ export class AppleHomeView extends HTMLElement {
   }
 
   private updateExistingCards(hass: any) {
-    // Update all existing apple-home-card elements with new hass
-    // Only update if hass actually changed to avoid unnecessary work
     if (this.content && hass) {
-      // Performance: Optimization - Prevent redundant updates if hass main state hasn't changed
       if (this._hass === hass) return;
 
-      // Use requestAnimationFrame to ensure we don't hog the main thread during high-frequency updates
       if (this._updateRequest) cancelAnimationFrame(this._updateRequest);
-      
+
       this._updateRequest = requestAnimationFrame(() => {
-        const cards = this.content!.querySelectorAll('apple-home-card');
-        for (const card of Array.from(cards)) {
-          const appleCard = card as any;
-          if (appleCard && appleCard.hass !== hass) {
-            appleCard.hass = hass;
+        let needsFullUpdate = !this._hass || !this._hass.states || !hass.states;
+        const changedEntities = new Set<string>();
+
+        if (!needsFullUpdate) {
+          for (const entityId in hass.states) {
+            if (this._hass.states[entityId] !== hass.states[entityId]) {
+              changedEntities.add(entityId);
+            }
           }
         }
+
+        // If many changes or full update, do a broad query
+        if (needsFullUpdate || changedEntities.size > 20) {
+          const allCards = this.content!.querySelectorAll('apple-home-card, apple-weather-card, apple-energy-card');
+          for (const card of Array.from(allCards)) {
+            const comp = card as any;
+            if (comp && comp.hass !== hass) {
+              comp.hass = hass;
+            }
+          }
+        } else if (changedEntities.size > 0) {
+          // Surgical updates for apple-home-cards based on data-entity-id
+          changedEntities.forEach(entityId => {
+            const wrappers = this.content!.querySelectorAll(`.entity-card-wrapper[data-entity-id="${entityId}"]`);
+            wrappers.forEach(wrapper => {
+              const card = wrapper.querySelector('apple-home-card') as any;
+              if (card && card.hass !== hass) {
+                card.hass = hass;
+              }
+            });
+          });
+
+          // Always propagate to weather and energy cards as they depend on multiple entities
+          const otherCards = this.content!.querySelectorAll('apple-weather-card, apple-energy-card');
+          for (const card of Array.from(otherCards)) {
+            const comp = card as any;
+            if (comp && comp.hass !== hass) {
+              comp.hass = hass;
+            }
+          }
+        }
+
         this._hass = hass;
         this._updateRequest = null;
       });
     }
-    
+
     // Update page instances with new hass data
     if (this.homePage) {
       this.homePage.hass = hass;
@@ -2143,12 +2265,12 @@ export class AppleHomeView extends HTMLElement {
 
   private handleEditModeChange(editMode: boolean) {
 
-    
+
     // Update chips edit mode
     if (this.chipsElement) {
       this.chipsElement.setEditMode(editMode);
     }
-    
+
     // Handle drag and drop for different page types
     if (this.config?.pageType === 'room') {
       // For room pages, use the main drag and drop manager (same as home page)
@@ -2162,7 +2284,7 @@ export class AppleHomeView extends HTMLElement {
           entityWrappers.forEach((wrapper) => {
             const element = wrapper as HTMLElement;
             element.classList.toggle('edit-mode', true);
-            
+
             const appleHomeCard = element.querySelector('apple-home-card') as any;
             if (appleHomeCard && typeof appleHomeCard.refreshEditMode === 'function') {
               appleHomeCard.refreshEditMode();
@@ -2176,13 +2298,13 @@ export class AppleHomeView extends HTMLElement {
         entityWrappers.forEach((wrapper) => {
           const element = wrapper as HTMLElement;
           element.classList.toggle('edit-mode', false);
-        
+
           const appleHomeCard = element.querySelector('apple-home-card') as any;
           if (appleHomeCard && typeof appleHomeCard.refreshEditMode === 'function') {
             appleHomeCard.refreshEditMode();
           }
         });
-        
+
         // Save current layout when exiting edit mode
         this.saveCurrentLayout();
       }
@@ -2208,7 +2330,7 @@ export class AppleHomeView extends HTMLElement {
           entityWrappers.forEach((wrapper) => {
             const element = wrapper as HTMLElement;
             element.classList.toggle('edit-mode', true);
-            
+
             const appleHomeCard = element.querySelector('apple-home-card') as any;
             if (appleHomeCard && typeof appleHomeCard.refreshEditMode === 'function') {
               appleHomeCard.refreshEditMode();
@@ -2223,19 +2345,19 @@ export class AppleHomeView extends HTMLElement {
         entityWrappers.forEach((wrapper) => {
           const element = wrapper as HTMLElement;
           element.classList.toggle('edit-mode', false);
-        
+
           const appleHomeCard = element.querySelector('apple-home-card') as any;
           if (appleHomeCard && typeof appleHomeCard.refreshEditMode === 'function') {
             appleHomeCard.refreshEditMode();
           }
         });
-        
+
         // Save current layout when exiting edit mode
         this.saveCurrentLayout();
       }
-      
+
       // Update host styles
-          // Update host styles for edit mode
+      // Update host styles for edit mode
       this.classList.toggle('edit-mode', editMode);
     }
   }
@@ -2289,16 +2411,16 @@ export class AppleHomeView extends HTMLElement {
     // This approach persists via Home Assistant storage and doesn't modify immutable objects
     // Use context-specific saving based on page type
     const context = this.getPageContext();
-    
+
     // For room pages, extract the domain from the container's data-device-group attribute
     let domain: string | undefined;
     if (context === 'room') {
       const deviceGroup = (areaContainer as HTMLElement).dataset.deviceGroup;
       domain = deviceGroup;
     }
-    
+
     this.customizationManager.saveCardOrderWithContext(areaId, newOrder, context, domain);
-    
+
 
   }
 
@@ -2319,14 +2441,14 @@ export class AppleHomeView extends HTMLElement {
     if (!this.content || !this._hass || this._isTransitioning) {
       return;
     }
-    
+
     // Prevent multiple renders within 500ms (accounts for settings save delays)
     const now = Date.now();
     if (now - this._lastRenderTime < 500) {
       return;
     }
     this._lastRenderTime = now;
-    
+
     // Set transition state to prevent concurrent renders
     this._isTransitioning = true;
 
@@ -2357,7 +2479,7 @@ export class AppleHomeView extends HTMLElement {
           group: this.config.deviceGroup as DeviceGroup,
           customizations: this.customizationManager.getCustomizations()
         });
-        
+
         await this.groupPage.render(
           this.content,
           this.config.deviceGroup as DeviceGroup,
@@ -2371,7 +2493,7 @@ export class AppleHomeView extends HTMLElement {
           areaId: this.config.areaId,
           customizations: this.customizationManager.getCustomizations()
         });
-        
+
         await this.roomPage.render(
           this.content,
           this.config.areaId,
@@ -2385,7 +2507,7 @@ export class AppleHomeView extends HTMLElement {
         this.scenesPage.setConfig({
           customizations: this.customizationManager.getCustomizations()
         });
-        
+
         await this.scenesPage.render(
           this.content,
           this._hass,
@@ -2397,7 +2519,7 @@ export class AppleHomeView extends HTMLElement {
         this.camerasPage.setConfig({
           customizations: this.customizationManager.getCustomizations()
         });
-        
+
         await this.camerasPage.render(
           this.content,
           this._hass,
@@ -2411,7 +2533,7 @@ export class AppleHomeView extends HTMLElement {
           title: homeTitle,
           customizations: this.customizationManager.getCustomizations()
         });
-        
+
         await this.homePage.render(
           this.content,
           this._hass,
@@ -2439,10 +2561,10 @@ export class AppleHomeView extends HTMLElement {
 
     // CRITICAL: Ensure chips are recreated and properly configured after page render
     this.ensureChipsExist();
-    
+
     // Update chips after page is rendered to reflect current state
     this.updateChips();
-    
+
     // CRITICAL: Connect chips to header after everything is ready
     setTimeout(() => {
       this.ensureChipsConfiguredForHeader();
@@ -2459,24 +2581,24 @@ export class AppleHomeView extends HTMLElement {
     if (!this.chipsElement) {
       return;
     }
-    
-    
+
+
     // Get chips settings from dashboard config - use defaults if not configured
     const chipsSettings = ChipsConfigurationManager.getSettingsFromConfig(this.config);
-    
+
     // Set configuration from settings
     this.chipsElement.setConfig(chipsSettings.chips_config);
-    
+
     // Set active group if specified in config
     if (this.config?.activeGroup) {
       this.chipsElement.setActiveGroup(this.config.activeGroup);
     }
-    
+
     // Set hass if available
     if (this._hass) {
       this.chipsElement.hass = this._hass;
     }
-    
+
   }
 
   /**
@@ -2484,7 +2606,7 @@ export class AppleHomeView extends HTMLElement {
    * Since chips are now permanent, we just need to reconfigure them
    */
   private forceChipsReset() {
-    
+
     // Make sure we have the chips reference from the correct location
     if (!this.chipsElement && this.content) {
       const chipsContainer = this.content.querySelector('.permanent-chips') as HTMLElement;
@@ -2493,12 +2615,12 @@ export class AppleHomeView extends HTMLElement {
         this.setupChipsCallback();
       }
     }
-    
+
     // Clear existing chips content to force clean state
     if (this.chipsElement) {
       this.chipsElement.clearContainer();
     }
-    
+
     // Re-configure chips to ensure they have the proper config
     if (this._hass) {
       this.configureChips();
@@ -2507,7 +2629,7 @@ export class AppleHomeView extends HTMLElement {
   }
 
   private ensureChipsExist() {
-    
+
     // Chips are now permanent - just make sure we have the reference
     if (!this.chipsElement && this.content) {
       const chipsContainer = this.content.querySelector('.permanent-chips') as HTMLElement;
@@ -2515,28 +2637,28 @@ export class AppleHomeView extends HTMLElement {
         this.chipsElement = new AppleChips(chipsContainer, this.customizationManager);
       }
     }
-    
+
     // Debug chips state
     if (this.chipsElement) {
-      
+
       // CRITICAL FIX: Always ensure chips are properly configured
       // This handles cases where the element exists but lost its config
       if (!this.chipsElement.isConfigured()) {
         this.configureChips();
       }
-      
+
       // Ensure hass is set
       if (!this.chipsElement.hass && this._hass) {
         this.chipsElement.hass = this._hass;
       }
     } else {
     }
-    
+
     // Configure chips for current page type
     if (this.chipsElement && this.chipsElement.isConfigured()) {
       const isGroupPage = this.config?.pageType === 'group';
       const isSpecialPage = ['room', 'scenes', 'cameras'].includes(this.config?.pageType);
-      
+
       if (isGroupPage && this.config?.deviceGroup) {
         // Group page - set active group for highlighting using deviceGroup
         this.chipsElement.setActiveGroup(this.config.deviceGroup);
@@ -2563,7 +2685,7 @@ export class AppleHomeView extends HTMLElement {
   private async toggleTallCard(entityId: string, areaId: string, clickedElement?: HTMLElement) {
     // Determine the correct context based on the current page type
     let context = 'home'; // default
-    
+
     if (this.config?.pageType === 'room') {
       context = 'room';
     } else if (this.config?.pageType === 'scenes') {
@@ -2574,20 +2696,20 @@ export class AppleHomeView extends HTMLElement {
       context = 'group';
     }
     // If pageType is undefined or 'home', context remains 'home'
-    
+
     // Wait for the toggle operation to complete with the correct context
     const newTallState = await this.cardManager.toggleTallCard(entityId, areaId, context);
-    
+
     // Now update the visual to match the new state - target the specific card that was clicked
     this.updateTallCardVisual(entityId, areaId, clickedElement, context);
-    
+
     return newTallState;
   }
 
   private updateTallCardVisual(entityId: string, areaId: string, clickedElement?: HTMLElement, context?: string) {
     // Try to find the specific card wrapper based on context and entity ID
     let wrapper: HTMLElement | null = null;
-    
+
     // Try context-specific selectors first
     if (context === 'home' && this.config?.pageType !== 'room') {
       // For home page, try to target the specific section based on areaId
@@ -2605,19 +2727,19 @@ export class AppleHomeView extends HTMLElement {
       // For other contexts (room, cameras page, scenes page), target within the specific area
       wrapper = this.shadowRoot!.querySelector(`[data-area-id="${areaId}"] [data-entity-id="${entityId}"]`) as HTMLElement;
     }
-    
+
     // Fallback to the old method if context-specific targeting fails
     if (!wrapper) {
       wrapper = this.shadowRoot!.querySelector(`[data-entity-id="${entityId}"]`) as HTMLElement;
     }
-    
+
     if (!wrapper) return;
-    
+
     const shouldBeTall = this.cardManager.shouldCardBeTall(entityId, areaId, context || 'home');
-    
+
     // Update the wrapper class for grid sizing
     wrapper.classList.toggle('tall', shouldBeTall);
-    
+
     // Update the card's design class
     const cardElement = wrapper.querySelector('apple-home-card') as any;
     if (cardElement) {
@@ -2626,7 +2748,7 @@ export class AppleHomeView extends HTMLElement {
       const newConfig = { ...currentConfig, is_tall: shouldBeTall };
       cardElement.setConfig(newConfig);
     }
-    
+
     // Update the button visual state
     const button = wrapper.querySelector('.tall-toggle') as HTMLButtonElement;
     if (button) {

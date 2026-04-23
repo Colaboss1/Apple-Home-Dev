@@ -653,9 +653,33 @@ export class CustomizationManager {
     return excluded.includes(entityId);
   }
 
+  async hideEntityFromHome(entityId: string): Promise<void> {
+    await this.ensureCustomizationsLoaded();
+    const homeData = this.getCustomization('home');
+    if (!homeData.excluded_from_home) {
+      homeData.excluded_from_home = [];
+    }
+    
+    if (!homeData.excluded_from_home.includes(entityId)) {
+      homeData.excluded_from_home.push(entityId);
+      await this.setCustomization('home', homeData);
+      await this.saveCustomizations();
+    }
+  }
+
   async hasFavoriteAccessories(): Promise<boolean> {
     const favorites = await this.getFavoriteAccessories();
     return favorites.length > 0;
+  }
+
+  async removeFavorite(entityId: string): Promise<void> {
+    await this.ensureCustomizationsLoaded();
+    const homeData = this.getCustomization('home');
+    if (homeData.favorites && homeData.favorites.includes(entityId)) {
+      homeData.favorites = homeData.favorites.filter((id: string) => id !== entityId);
+      await this.setCustomization('home', homeData);
+      await this.saveCustomizations();
+    }
   }
 
   async getShowSwitches(): Promise<boolean> {

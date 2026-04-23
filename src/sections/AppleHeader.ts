@@ -479,31 +479,33 @@ export class AppleHeader {
               </div>
               <div class="apple-header-scrolled-chips"></div>
             </div>
-            ${this.currentConfig.showMenu ? `
-              <button class="apple-header-menu-button ${LiquidGlassClasses.headerButton}">
-                ${this.getMenuButtonContent()}
+            <div class="apple-header-actions-right">
+              <button class="apple-header-add-button ${LiquidGlassClasses.headerButton}">
+                <ha-icon icon="mdi:plus"></ha-icon>
               </button>
-              <div class="apple-header-dropdown">
-                ${this.getDropdownContent()}
-              </div>
-            ` : ''}
+              ${this.currentConfig.showMenu ? `
+                <button class="apple-header-menu-button ${LiquidGlassClasses.headerButton}">
+                  ${this.getMenuButtonContent()}
+                </button>
+                <div class="apple-header-dropdown">
+                  ${this.getDropdownContent()}
+                </div>
+              ` : ''}
+            </div>
             <div class="apple-ipad-top-nav">
+               <button class="apple-header-sidebar-open-btn">
+                  <ha-icon icon="${RTLHelper.isRTL() ? 'mdi:dock-left' : 'mdi:dock-right'}"></ha-icon>
+               </button>
                <div class="ipad-nav-item ${(!this.currentConfig.pageType || this.currentConfig.pageType === 'home') ? 'active' : ''}" data-nav="home">
-                 <ha-icon icon="mdi:home-variant-outline"></ha-icon>
                  <span>${localize('pages.my_home') || 'Zuhause'}</span>
                </div>
                <div class="ipad-nav-item ${(this.currentConfig.pageType === 'scenes' || this.currentConfig.pageType === 'cameras') ? 'active' : ''}" data-nav="automation">
-                 <ha-icon icon="mdi:clock-star-four-points"></ha-icon>
                  <span>${localize('ui_actions.automation') || 'Automation'}</span>
                </div>
                <div class="ipad-nav-item" data-nav="explore">
-                 <ha-icon icon="mdi:star-outline"></ha-icon>
                  <span>Entdecken</span>
                </div>
             </div>
-            <button class="apple-header-sidebar-open-btn ${LiquidGlassClasses.headerButton}">
-               <ha-icon icon="${RTLHelper.isRTL() ? 'mdi:dock-left' : 'mdi:dock-right'}"></ha-icon>
-            </button>
           </div>
         </div>
       `;
@@ -581,7 +583,7 @@ export class AppleHeader {
 
   private getMenuButtonContent(): string {
     if (this.editMode) {
-      return `<ha-icon icon="mdi:check"></ha-icon>`;
+      return `<span class="done-text">Fertig</span>`;
     }
     // iOS 26 Liquid Glass style - larger dots without circle outline
     return `
@@ -1839,6 +1841,8 @@ export class AppleHeader {
         bottom: 0;
         backdrop-filter: blur(20px);
         -webkit-backdrop-filter: blur(20px);
+        transform: translateZ(0);
+        will-change: transform, backdrop-filter;
         -webkit-mask-image: linear-gradient(
           to bottom,
           rgba(0, 0, 0, 1) 0%,
@@ -1863,58 +1867,73 @@ export class AppleHeader {
         position: relative;
       }
 
-      /* iPad Top Nav */
+      /* iPad Top Nav - Frosted Glass Pill */
       .apple-ipad-top-nav {
         display: none;
         position: absolute;
         left: 50%;
         top: 50%;
         transform: translate(-50%, -50%);
-        /* Performance: Blur removed for 120FPS smoothness. */
-        background: rgba(40, 40, 40, 0.98);
-        border: 1px solid rgba(255, 255, 255, 0.1);
-        border-radius: 12px;
+        background: rgba(100, 100, 100, 0.15); /* Match native slight gray/white translucent */
+        backdrop-filter: blur(20px);
+        -webkit-backdrop-filter: blur(20px);
+        border: none;
+        border-radius: 30px;
         padding: 4px;
         z-index: 10;
+        align-items: center;
+        gap: 2px;
+        transform: translate3d(-50%, -50%, 0);
+        will-change: transform, backdrop-filter;
       }
       
       .apple-ipad-top-nav .ipad-nav-item {
-        padding: 6px 16px;
-        border-radius: 8px;
+        padding: 8px 16px;
+        border-radius: 20px;
         display: flex;
         align-items: center;
+        justify-content: center;
         gap: 6px;
         cursor: pointer;
-        color: rgba(255,255,255,0.7);
-        font-size: 14px;
+        color: rgba(255, 255, 255, 0.7);
+        font-size: 15px;
         font-weight: 500;
-        transition: all 0.2s ease;
+        transition: all 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+        letter-spacing: -0.3px;
       }
       
       .apple-ipad-top-nav .ipad-nav-item:hover {
-        background: rgba(255,255,255,0.05);
+        color: rgba(255, 255, 255, 0.9);
       }
       
       .apple-ipad-top-nav .ipad-nav-item.active {
-        background: rgba(255,255,255,0.15);
-        color: white;
+        background: rgba(255, 255, 255, 1);
+        color: #1d1d1f;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
       }
       
-      .apple-ipad-top-nav ha-icon {
-        --mdc-icon-size: 18px;
-      }
-
       .apple-header-sidebar-open-btn {
-        display: none;
-        position: absolute;
-        right: 60px; /* Offset from menu button */
-        top: 50%;
-        transform: translateY(-50%);
-        z-index: 10;
+        background: transparent;
+        border: none;
+        color: rgba(255, 255, 255, 0.8);
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 36px;
+        height: 36px;
+        border-radius: 50%;
+        transition: all 0.2s ease;
+        margin-right: 4px;
+        margin-left: 2px;
+      }
+      
+      .apple-header-sidebar-open-btn:hover {
+        background: rgba(255, 255, 255, 0.1);
       }
       
       .apple-header-sidebar-open-btn:active {
-        transform: translateY(-50%) scale(0.95);
+        transform: scale(0.95);
       }
 
       .apple-header-sidebar-open-btn ha-icon {
@@ -1925,10 +1944,6 @@ export class AppleHeader {
       
       /* Display iPad nav only when sidebar collapsed and in iPad mode */
       apple-home-view.is-ipad-mode.sidebar-collapsed .apple-ipad-top-nav {
-         display: flex;
-      }
-      
-      apple-home-view.is-ipad-mode.sidebar-collapsed .apple-header-sidebar-open-btn {
          display: flex;
       }
 
@@ -2117,88 +2132,95 @@ export class AppleHeader {
         display: block;
       }
 
-      /* Menu button - positioning only (glass effect from .liquid-glass-transparent) */
-      .apple-header-menu-button {
+      /* Header Right Actions Container */
+      .apple-header-actions-right {
         position: absolute;
         top: 50%;
         transform: translateY(-50%);
         right: 16px;
         z-index: 10;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+      }
+      
+      .apple-header-add-button ha-icon {
+        --mdc-icon-size: 24px;
+      }
+
+      /* Menu button - positioning only (glass effect from .liquid-glass-transparent) */
+      .apple-header-menu-button {
         font-family: inherit;
       }
 
-      .apple-header-menu-button:active {
-        transform: translateY(-50%) scale(0.95);
+      .apple-header-menu-button:active,
+      .apple-header-add-button:active {
+        transform: scale(0.95);
       }
 
       /* Fixed top position for group pages */
-      .apple-home-header.group-page .apple-header-menu-button {
+      .apple-home-header.group-page .apple-header-actions-right {
         top: 12px;
         transform: none;
       }
 
-      .apple-home-header.group-page .apple-header-menu-button:active {
-        transform: scale(0.97);
-      }
-
-      /* RTL positioning for group-page menu button */
-      .apple-home-header.group-page.rtl .apple-header-menu-button {
-        right: auto !important;
-        left: 16px !important;
-        top: 12px;
-        transform: none;
-      }
-
-      .apple-home-header.rtl .apple-header-menu-button {
+      .apple-home-header.group-page.rtl .apple-header-actions-right {
         right: auto !important;
         left: 16px !important;
       }
 
-      /* Mobile adjustments for menu button */
+      .apple-home-header.rtl .apple-header-actions-right {
+        right: auto !important;
+        left: 16px !important;
+      }
+
       @media (max-width: 768px) {
-        .apple-header-menu-button {
+        .apple-header-actions-right {
           right: 12px;
+          gap: 8px;
+        }
+        
+        .apple-header-menu-button,
+        .apple-header-add-button {
           width: 34px;
           height: 34px;
           min-width: 34px;
         }
 
-        .apple-home-header.rtl .apple-header-menu-button {
+        .apple-home-header.rtl .apple-header-actions-right {
           right: auto !important;
           left: 12px !important;
         }
       }
 
       .apple-header-menu-button.edit-mode {
-        background: rgba(255, 149, 0, 0.85) !important;
-        box-shadow: 
-          inset 0 0 0 1px rgba(255, 255, 255, 0.3),
-          inset 0 1px 0 rgba(255, 255, 255, 0.4),
-          inset 0 -1px 0 rgba(0, 0, 0, 0.1),
-          0 2px 8px rgba(255, 149, 0, 0.3) !important;
-      }
-
-      .apple-header-menu-button.edit-mode::before {
-        background: linear-gradient(
-          135deg,
-          rgba(255, 255, 255, 0.5) 0%,
-          rgba(255, 200, 100, 0.2) 25%,
-          rgba(255, 255, 255, 0.35) 50%,
-          rgba(255, 200, 100, 0.15) 75%,
-          rgba(255, 255, 255, 0.45) 100%
-        ) !important;
+        background: rgba(255, 255, 255, 0.2) !important;
+        backdrop-filter: blur(20px) saturate(1.5) !important;
+        -webkit-backdrop-filter: blur(20px) saturate(1.5) !important;
+        border-radius: 20px !important;
+        padding: 4px 16px !important;
+        width: auto !important;
+        min-width: unset !important;
+        height: 32px !important;
+        color: white !important;
+        font-weight: 600 !important;
+        font-size: 14px !important;
+        box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1) !important;
+        transition: all 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94) !important;
+        letter-spacing: -0.2px !important;
       }
 
       .apple-header-menu-button.edit-mode:hover {
-        background: rgba(255, 159, 10, 0.9) !important;
+        background: rgba(255, 255, 255, 0.3) !important;
       }
 
       .apple-header-menu-button.edit-mode:active {
-        background: rgba(255, 139, 0, 0.95) !important;
+        background: rgba(255, 255, 255, 0.4) !important;
+        transform: scale(0.95) !important;
       }
 
-      .apple-header-menu-button.edit-mode ha-icon {
-        --mdc-icon-size: 22px;
+      .apple-header-menu-button.edit-mode .done-text {
+        display: block;
       }
 
       /* Dropdown */
@@ -2215,6 +2237,8 @@ export class AppleHeader {
         background: rgba(28, 28, 30, 0.88);
         backdrop-filter: blur(20px);
         -webkit-backdrop-filter: blur(20px);
+        transform: translateZ(0);
+        will-change: transform, backdrop-filter, opacity;
         border-radius: var(--apple-modal-radius, 20px);
         padding: 4px 0;
         opacity: 0;

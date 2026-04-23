@@ -177,7 +177,7 @@ export class DashboardConfig {
   // Common inactive styling (same for all devices)
   // Uses CSS variables from LiquidGlassStyles.ts for centralized control
   private static readonly INACTIVE_STYLE = {
-    backgroundColor: 'var(--apple-card-bg-inactive, rgba(56, 56, 56, 0.46))',
+    backgroundColor: 'var(--apple-card-bg-inactive, rgba(0, 0, 0, 0.25))',
     iconColor: 'var(--apple-icon-inactive, rgba(142, 142, 147, 0.8))',
     iconBackgroundColor: 'var(--apple-icon-bg-inactive, rgba(0, 0, 0, 0.2))',
     textColor: 'var(--apple-text-inactive, #ffffff)'

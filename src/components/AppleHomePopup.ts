@@ -114,8 +114,11 @@ export class AppleHomePopup extends HTMLElement {
           left: 0;
           width: 100vw;
           height: 100vh;
-          background: rgba(0, 0, 0, 0.7);
-          /* Performance: Blur removed to ensure 120FPS on iPad M4. High-depth semi-transparent black used instead. */
+          background: rgba(0, 0, 0, 0.4);
+          backdrop-filter: blur(40px) saturate(1.5);
+          -webkit-backdrop-filter: blur(40px) saturate(1.5);
+          transform: translateZ(0);
+          will-change: transform, backdrop-filter;
           z-index: 100001;
           pointer-events: auto;
           cursor: pointer;
@@ -151,12 +154,13 @@ export class AppleHomePopup extends HTMLElement {
           position: relative;
           width: 130px;
           height: 380px;
-          background: rgba(255, 255, 255, 0.1);
+          background: rgba(255, 255, 255, 0.15);
           border-radius: 45px;
           overflow: hidden;
           box-shadow: 0 4px 30px rgba(0,0,0,0.1);
           touch-action: none;
           margin-bottom: 30px;
+          transform: translateZ(0); /* For rounding clipping */
         }
 
         .slider-track {
@@ -203,11 +207,12 @@ export class AppleHomePopup extends HTMLElement {
         }
 
         .entity-name {
-          font-size: 32px;
+          font-size: 34px;
           font-weight: 700;
           letter-spacing: -0.8px;
           margin-bottom: 5px;
           text-shadow: 0 2px 10px rgba(0,0,0,0.2);
+          text-align: center;
         }
 
         .entity-state {

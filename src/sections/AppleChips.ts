@@ -437,7 +437,7 @@ export class AppleChips {
       <style>
         :host {
           --media-active-icon-color: ${mediaActiveIconColor};
-          --chip-background-color: var(--apple-chip-bg-inactive, rgba(56, 56, 56, 0.46));
+          --chip-background-color: var(--apple-chip-bg-inactive, rgba(0, 0, 0, 0.35));
         }
         
         /* Match StatusSection structure exactly */
@@ -490,7 +490,7 @@ export class AppleChips {
         }
 
         .chip-wrapper.edit-mode {
-          animation: apple-home-shake 1.3s ease-in-out infinite;
+          animation: apple-home-shake 0.25s linear infinite;
           touch-action: none;
         }
 
@@ -509,13 +509,12 @@ export class AppleChips {
         .chip {
           display: flex;
           align-items: center;
-          gap: var(--apple-chip-gap, 6px);
-          padding: var(--apple-chip-padding, 3px 16px 3px 8px);
+          gap: var(--apple-chip-gap, 8px);
+          padding: var(--apple-chip-padding, 6px 16px 6px 6px);
           border-radius: 50px;
           background: var(--chip-background-color);
-          /* Performance: Removed blur from chips */
-          backdrop-filter: none;
-          -webkit-backdrop-filter: none;
+          backdrop-filter: blur(10px);
+          -webkit-backdrop-filter: blur(10px);
           color: white;
           font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', Roboto, sans-serif;
           cursor: pointer;
@@ -575,21 +574,24 @@ export class AppleChips {
         }
 
         .chip-icon {
-          width: var(--apple-chip-icon-size, 24px);
-          height: var(--apple-chip-icon-size, 24px);
+          width: var(--apple-chip-icon-size, 26px);
+          height: var(--apple-chip-icon-size, 26px);
           display: flex;
           align-items: center;
           justify-content: center;
           align-self: center;
-          color: var(--chip-icon-color);
+          background-color: var(--chip-icon-color);
+          color: white;
+          border-radius: 50%;
           flex-shrink: 0;
+          box-shadow: 0 1px 3px rgba(0,0,0,0.1);
         }
 
         .chip-icon ha-icon {
-          width: var(--apple-chip-icon-size, 24px);
-          height: var(--apple-chip-icon-size, 24px);
-          --mdc-icon-size: var(--apple-chip-icon-size, 24px);
-          color: var(--chip-icon-color);
+          width: 16px;
+          height: 16px;
+          --mdc-icon-size: 16px;
+          color: white;
           display: flex;
           align-items: center;
           justify-content: center;
@@ -703,16 +705,26 @@ export class AppleChips {
         }
 
         @keyframes apple-home-shake {
-          0%, 100% { transform: translateX(0px) rotate(0deg); }
-          10% { transform: translateX(-1px) rotate(-0.6deg); }
-          20% { transform: translateX(1px) rotate(0.6deg); }
-          30% { transform: translateX(-1px) rotate(-0.6deg); }
-          40% { transform: translateX(1px) rotate(0.6deg); }
-          50% { transform: translateX(-1px) rotate(-0.6deg); }
-          60% { transform: translateX(1px) rotate(0.6deg); }
-          70% { transform: translateX(-1px) rotate(-0.6deg); }
-          80% { transform: translateX(1px) rotate(0.6deg); }
-          90% { transform: translateX(-1px) rotate(-0.6deg); }
+          0% { transform: translate(0, 0) rotate(0deg); }
+          25% { transform: translate(-0.5px, 0.5px) rotate(-0.5deg); }
+          50% { transform: translate(0.5px, -0.2px) rotate(0.5deg); }
+          75% { transform: translate(0.5px, 0.5px) rotate(-0.5deg); }
+          100% { transform: translate(0, 0) rotate(0deg); }
+        }
+        
+        .chip-wrapper.edit-mode:nth-child(even) {
+          animation-duration: 0.25s;
+          animation-delay: -0.1s;
+        }
+        
+        .chip-wrapper.edit-mode:nth-child(odd) {
+          animation-duration: 0.27s;
+          animation-delay: -0.2s;
+        }
+        
+        .chip-wrapper.edit-mode:nth-child(3n) {
+          animation-duration: 0.23s;
+          animation-delay: -0.15s;
         }
       </style>
       <div class="apple-chips-section">

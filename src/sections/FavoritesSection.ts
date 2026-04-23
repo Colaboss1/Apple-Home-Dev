@@ -139,6 +139,27 @@ export class FavoritesSection {
       // Favorites are always regular size, never tall
       // Don't add tall class
       
+      // Add hide/remove button (top-left, Apple-style minus circle)
+      // For favorites, this button removes the item from favorites
+      const hideBtn = document.createElement('button');
+      hideBtn.className = 'entity-control-btn entity-hide-btn';
+      hideBtn.dataset.action = 'hide-entity';
+      hideBtn.title = 'Remove from Favorites';
+      hideBtn.innerHTML = `<ha-icon icon="mdi:minus"></ha-icon>`;
+      hideBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        // Dispatch custom event for AppleHomeView to handle
+        wrapper.dispatchEvent(new CustomEvent('apple-home-hide-entity', {
+          bubbles: true,
+          composed: true,
+          detail: { 
+            entityId: cardConfig.entity,
+            areaId: 'favorites'
+          }
+        }));
+      });
+      
+      wrapper.appendChild(hideBtn);
       wrapper.appendChild(cardElement);
       container.appendChild(wrapper);
     } catch (error) {

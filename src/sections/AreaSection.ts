@@ -201,7 +201,7 @@ export class AreaSection {
         wrapper.classList.add('tall');
       }
       
-      // Always add edit mode controls
+      // Always add edit mode controls (top-right: tall toggle)
       const controlsDiv = document.createElement('div');
       controlsDiv.className = 'entity-controls';
       
@@ -233,6 +233,26 @@ export class AreaSection {
         });
       }
       
+      // Add hide/remove button (top-left, Apple-style minus circle)
+      const hideBtn = document.createElement('button');
+      hideBtn.className = 'entity-control-btn entity-hide-btn';
+      hideBtn.dataset.action = 'hide-entity';
+      hideBtn.title = 'Hide from Home';
+      hideBtn.innerHTML = `<ha-icon icon="mdi:minus"></ha-icon>`;
+      hideBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        // Dispatch custom event for AppleHomeView to handle
+        wrapper.dispatchEvent(new CustomEvent('apple-home-hide-entity', {
+          bubbles: true,
+          composed: true,
+          detail: { 
+            entityId: cardConfig.entity,
+            areaId: container.dataset.areaId || 'unknown'
+          }
+        }));
+      });
+      
+      wrapper.appendChild(hideBtn);
       wrapper.appendChild(controlsDiv);
       wrapper.appendChild(cardElement);
       container.appendChild(wrapper);
