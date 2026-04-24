@@ -7,7 +7,9 @@ import { AreaSection } from '../sections/AreaSection';
 import { FavoritesSection } from '../sections/FavoritesSection';
 import { WeatherSection } from '../sections/WeatherSection';
 import { EnergySection } from '../sections/EnergySection';
+import { StatusSection } from '../sections/StatusSection';
 import { Entity, Area } from '../types/types';
+import { localize } from '../utils/LocalizationService';
 
 export class HomePage {
   private customizationManager?: CustomizationManager;
@@ -17,23 +19,21 @@ export class HomePage {
   private favoritesSection?: FavoritesSection;
   private weatherSection?: WeatherSection;
   private energySection?: EnergySection;
+  private statusSection?: StatusSection;
   private _hass?: any;
   private _title?: string;
   private _config?: any;
 
-  constructor() {
-    // Regular class constructor
-  }
+  constructor() {}
 
   set hass(hass: any) {
     this._hass = hass;
+    if (this.statusSection) this.statusSection.hass = hass;
   }
 
   async setConfig(config: any) {
     this._config = config;
     this._title = config.title;
-    
-    // Initialize customization manager from config
     if (config.customizations && this._hass) {
       this.customizationManager = CustomizationManager.getInstance(this._hass);
       await this.customizationManager.setCustomizations(config.customizations);
@@ -49,341 +49,143 @@ export class HomePage {
       this.favoritesSection = new FavoritesSection(this.customizationManager);
       this.weatherSection = new WeatherSection(this.customizationManager);
       this.energySection = new EnergySection(this.customizationManager);
+      this.statusSection = new StatusSection(this.customizationManager);
     }
   }
 
   private createHomeTitle(title: string): HTMLElement {
-    const titleElement = document.createElement('h1');
-    titleElement.className = 'apple-page-title';
-    titleElement.textContent = title;
-    return titleElement;
+    const el = document.createElement('h1');
+    el.className = 'apple-page-title';
+    el.textContent = title;
+    return el;
   }
 
-  async render(
-    container: HTMLElement,
-    hass: any,
-    title: string,
-    onTallToggle?: (entityId: string, areaId: string) => void | Promise<void | boolean>
-  ): Promise<void> {
-    // Remove only dynamic content, keep permanent elements (header, chips) in place
-    const permanentSelectors = ['.apple-home-header', '.permanent-chips'];
-    Array.from(container.children).forEach(child => {
-      const isPermanent = permanentSelectors.some(sel => child.matches(sel));
-      if (!isPermanent) child.remove();
-    });
+  async render(container: HTMLElement, hass: any, title: string, onTallToggle?: (eid: string, aid: string) => void | Promise<void | boolean>): Promise<void> {
+    const permanent = ['.apple-home-header', '.permanent-chips'];
+    Array.from(container.children).forEach(c => { if (!permanent.some(s => c.matches(s))) c.remove(); });
 
-    // Add home title after header but before chips
     const homeTitle = this.createHomeTitle(title);
-    const existingPermanentChips = container.querySelector('.permanent-chips');
-    if (existingPermanentChips) {
-      container.insertBefore(homeTitle, existingPermanentChips);
-    } else {
-      container.appendChild(homeTitle);
-    }
+    const chips = container.querySelector('.permanent-chips');
+    if (chips) container.insertBefore(homeTitle, chips); else container.appendChild(homeTitle);
 
     try {
-      // Fetch all data in parallel
       const [areas, entities, devices, showSwitches, includedSwitches, extraAccessories] = await Promise.all([
-        DataService.getAreas(hass),
-        DataService.getEntities(hass),
-        DataService.getDevices(hass),
+        DataService.getAreas(hass), DataService.getEntities(hass), DataService.getDevices(hass),
         this.customizationManager?.getShowSwitches().then(v => v || false) ?? Promise.resolve(false),
         this.customizationManager?.getIncludedSwitches().then(v => v || []) ?? Promise.resolve([] as string[]),
         this.customizationManager?.getExtraAccessories().then(v => v || []) ?? Promise.resolve([] as string[])
       ]);
       
-      // Filter entities for supported domains and exclude those marked for exclusion
-      const supportedEntities = entities.filter(entity => {
-        const domain = entity.entity_id.split('.')[0];
-
-        // Check if this entity is in the extraAccessories list (manually added entities)
-        if (extraAccessories.includes(entity.entity_id)) {
-          return true;
+      const supported = entities.filter(e => {
+        const dom = e.entity_id.split('.')[0];
+        if (extraAccessories.includes(e.entity_id)) return true;
+        if (e.entity_category === 'config' || e.entity_category === 'diagnostic') return false;
+        if (!DashboardConfig.isSupportedDomain(dom)) return false;
+        if (dom === 'switch') {
+          const s = hass.states[e.entity_id];
+          if (showSwitches) return DashboardConfig.getDeviceGroup(dom, e.entity_id, s?.attributes, showSwitches) !== undefined;
+          return DashboardConfig.isOutlet(e.entity_id, s?.attributes) || includedSwitches.includes(e.entity_id);
         }
-
-        // Exclude configuration and diagnostic entities from auto-discovery
-        // These should only be included via custom entities (extra accessories)
-        if (entity.entity_category === 'config' || entity.entity_category === 'diagnostic') {
-          return false;
-        }
-
-        if (!DashboardConfig.isSupportedDomain(domain)) {
-          return false;
-        }
-        
-        // Additional filtering for switches based on showSwitches setting and includedSwitches
-        if (domain === 'switch') {
-          const entityState = hass.states[entity.entity_id];
-          
-          // If showSwitches is true, use the standard device group logic
-          if (showSwitches) {
-            const entityGroup = DashboardConfig.getDeviceGroup(domain, entity.entity_id, entityState?.attributes, showSwitches);
-            return entityGroup !== undefined;
-          } else {
-            // If showSwitches is false, only show switches that are in includedSwitches or are outlets
-            const isOutlet = DashboardConfig.isOutlet(entity.entity_id, entityState?.attributes);
-            const isIncluded = includedSwitches.includes(entity.entity_id);
-            return isOutlet || isIncluded;
-          }
-        }
-        
         return true;
       });
 
-      // Batch-fetch exclusion lists once, then filter synchronously
-      const excludedFromDashboard = new Set(await this.customizationManager?.getExcludedFromDashboard() || []);
-      const excludedFromHome = new Set(await this.customizationManager?.getExcludedFromHome() || []);
+      const excludedDash = new Set(await this.customizationManager?.getExcludedFromDashboard() || []);
+      const excludedHome = new Set(await this.customizationManager?.getExcludedFromHome() || []);
+      const filtered = supported.filter(e => !excludedDash.has(e.entity_id));
 
-      const filteredEntities = supportedEntities.filter(entity => !excludedFromDashboard.has(entity.entity_id));
+      if (this.statusSection) {
+        const statusEnts = entities.filter(e => {
+          if (e.entity_category === 'config' || e.entity_category === 'diagnostic') return false;
+          const dom = e.entity_id.split('.')[0];
+          if (!DashboardConfig.isStatusDomain(dom)) return false;
+          return !excludedDash.has(e.entity_id);
+        });
+        await this.statusSection.render(container, statusEnts, hass);
+      }
 
-      // Separate special section entities from regular area entities
-      const scenesEntities: typeof filteredEntities = [];
-      const camerasEntities: typeof filteredEntities = [];
-      const regularEntities: typeof filteredEntities = [];
-
-      for (const entity of filteredEntities) {
-        if (excludedFromHome.has(entity.entity_id)) continue;
-        const domain = entity.entity_id.split('.')[0];
-        if (DashboardConfig.isScenesDomain(domain)) {
-          scenesEntities.push(entity);
-        } else if (DashboardConfig.isCamerasDomain(domain)) {
-          camerasEntities.push(entity);
-        } else if (!DashboardConfig.isSpecialSectionDomain(domain)) {
-          regularEntities.push(entity);
-        }
+      const scenes: Entity[] = [], cameras: Entity[] = [], regular: Entity[] = [];
+      for (const e of filtered) {
+        if (excludedHome.has(e.entity_id)) continue;
+        const dom = e.entity_id.split('.')[0];
+        if (DashboardConfig.isScenesDomain(dom)) scenes.push(e);
+        else if (DashboardConfig.isCamerasDomain(dom)) cameras.push(e);
+        else if (!DashboardConfig.isSpecialSectionDomain(dom)) regular.push(e);
       }
       
-      // Group regular entities by area
-      const entitiesByArea = DataService.groupEntitiesByArea(regularEntities, areas, devices);
+      const entitiesByArea = DataService.groupEntitiesByArea(regular, areas, devices);
+      if (!this.customizationManager) throw new Error('CustomizationManager missing');
       
-      // Apply user customizations
-      if (!this.customizationManager) {
-        throw new Error('CustomizationManager not initialized');
-      }
-      
-      const customizations = this.customizationManager.getCustomizations();
-      const customizedAreas = this.applyCustomizations(entitiesByArea, customizations);
-      
-      // Render sections in order based on customizations
-      await this.renderSectionsInOrder(
-        container, 
-        customizedAreas, 
-        scenesEntities, 
-        camerasEntities, 
-        filteredEntities, // Pass all filtered entities for favorites
-        hass, 
-        onTallToggle
-      );
-      
-    } catch (error) {
-      console.error('Error rendering home page:', error);
-    }
+      const customizedAreas = this.applyCustomizations(entitiesByArea, this.customizationManager.getCustomizations());
+      await this.renderSectionsInOrder(container, customizedAreas, scenes, cameras, filtered, hass, onTallToggle);
+    } catch (e) { console.error('Error rendering HomePage:', e); }
   }
 
-  private async renderSectionsInOrder(
-    container: HTMLElement,
-    entitiesByArea: { [areaId: string]: Entity[] },
-    scenesEntities: Entity[],
-    camerasEntities: Entity[],
-    allEntities: Entity[],
-    hass: any,
-    onTallToggle?: (entityId: string, areaId: string) => void | Promise<void | boolean>
-  ): Promise<void> {
-    if (!this.customizationManager || !this.scenesSection || !this.camerasSection || !this.areaSection || !this.favoritesSection || !this.weatherSection || !this.energySection) {
-      throw new Error('Required sections not initialized');
-    }
+  private async renderSectionsInOrder(container: HTMLElement, areas: { [aid: string]: Entity[] }, scenes: Entity[], cameras: Entity[], all: Entity[], hass: any, onTallToggle?: (eid: string, aid: string) => void | Promise<void | boolean>): Promise<void> {
+    if (!this.customizationManager || !this.scenesSection || !this.camerasSection || !this.areaSection || !this.favoritesSection || !this.weatherSection || !this.energySection) throw new Error('Sections missing');
     
-    // Get section order and hidden sections
-    const sectionOrder = this.customizationManager.getSavedSectionOrder();
-    const hiddenSections = this.customizationManager.getHiddenSections();
-    
-    // Create a map of all available sections (closures accept optional target container)
-    const availableSections = new Map<string, (target?: HTMLElement) => Promise<void>>();
+    const order = this.customizationManager.getSavedSectionOrder(), hidden = this.customizationManager.getHiddenSections();
+    const available = new Map<string, (target?: HTMLElement) => Promise<void>>();
 
-    // Add weather section if a weather entity is configured and exists
-    const weatherEntity = await this.customizationManager?.getWeatherEntity();
-    const hasWeather = !!(weatherEntity && hass.states[weatherEntity]);
-    if (hasWeather) {
-      availableSections.set('weather_section', async (target?: HTMLElement) => {
-        await this.weatherSection!.render(target || container, hass);
-      });
+    const wEntity = await this.customizationManager.getWeatherEntity();
+    if (wEntity && hass.states[wEntity]) available.set('weather_section', async (t) => { await this.weatherSection!.render(t || container, hass); });
+
+    const showE = await this.customizationManager.getShowEnergy();
+    if (showE && EnergySection.hasEnergySensors(hass)) available.set('energy_section', async (t) => { await this.energySection!.render(t || container, hass); });
+
+    if (await this.customizationManager.hasFavoriteAccessories()) available.set('favorites_section', async (t) => { await this.favoritesSection!.render(t || container, all, hass, onTallToggle); });
+    if (scenes.length > 0) available.set('scenes_section', async (t) => { await this.scenesSection!.render(t || container, scenes, hass, onTallToggle); });
+    if (cameras.length > 0) available.set('cameras_section', async (t) => { await this.camerasSection!.render(t || container, cameras, hass, onTallToggle); });
+
+    for (const aid of Object.keys(areas)) {
+      if (areas[aid].length > 0) available.set(aid, async (t) => { await this.areaSection!.renderSingleArea(t || container, aid, areas[aid], hass, onTallToggle, 'home'); });
     }
 
-    // Add energy section if enabled in settings and energy sensors exist
-    const showEnergy = await this.customizationManager?.getShowEnergy();
-    const hasEnergy = !!(showEnergy && EnergySection.hasEnergySensors(hass));
-    if (hasEnergy) {
-      availableSections.set('energy_section', async (target?: HTMLElement) => {
-        await this.energySection!.render(target || container, hass);
-      });
-    }
-
-    // Add favorites section if there are favorites defined
-    const hasFavorites = await this.customizationManager?.hasFavoriteAccessories();
-    if (hasFavorites) {
-      availableSections.set('favorites_section', async (target?: HTMLElement) => {
-        await this.favoritesSection!.render(target || container, allEntities, hass, onTallToggle);
-      });
-    }
-
-    // Add scenes section if there are any scenes or scripts
-    if (scenesEntities.length > 0) {
-      availableSections.set('scenes_section', async (target?: HTMLElement) => {
-        await this.scenesSection!.render(target || container, scenesEntities, hass, onTallToggle);
-      });
-    }
-
-    // Add cameras section if there are any cameras
-    if (camerasEntities.length > 0) {
-      availableSections.set('cameras_section', async (target?: HTMLElement) => {
-        await this.camerasSection!.render(target || container, camerasEntities, hass, onTallToggle);
-      });
-    }
-
-    // Add area sections
-    for (const areaId of Object.keys(entitiesByArea)) {
-      if (entitiesByArea[areaId].length > 0) {
-        availableSections.set(areaId, async (target?: HTMLElement) => {
-          await this.areaSection!.renderSingleArea(target || container, areaId, entitiesByArea[areaId], hass, onTallToggle, 'home');
-        });
-      }
-    }
-
-    // Apply section ordering
-    let orderedSectionIds: string[] = [];
-
-    if (sectionOrder.length > 0) {
-      // Use saved order
-      orderedSectionIds = sectionOrder.filter(id => availableSections.has(id));
-
-      // Add any new sections that weren't in the saved order
-      for (const sectionId of availableSections.keys()) {
-        if (!orderedSectionIds.includes(sectionId)) {
-          // Weather/energy sections default to first position when newly added
-          if (sectionId === 'weather_section' || sectionId === 'energy_section') {
-            orderedSectionIds.unshift(sectionId);
-          } else {
-            orderedSectionIds.push(sectionId);
-          }
-        }
-      }
+    let ids: string[] = [];
+    if (order.length > 0) {
+      ids = order.filter(id => available.has(id));
+      for (const sid of available.keys()) { if (!ids.includes(sid)) { if (sid === 'weather_section' || sid === 'energy_section') ids.unshift(sid); else ids.push(sid); } }
     } else {
-      // Default order: weather, energy, cameras, scenes, favorites, then areas alphabetically
-      orderedSectionIds = Array.from(availableSections.keys()).sort((a, b) => {
-        if (a === 'weather_section') return -1;
-        if (b === 'weather_section') return 1;
-        if (a === 'energy_section') return -1;
-        if (b === 'energy_section') return 1;
-        if (a === 'cameras_section') return -1;
-        if (b === 'cameras_section') return 1;
-        if (a === 'scenes_section') return -1;
-        if (b === 'scenes_section') return 1;
-        if (a === 'favorites_section') return -1;
-        if (b === 'favorites_section') return 1;
-        return a.localeCompare(b);
+      ids = Array.from(available.keys()).sort((a, b) => {
+        const p = { 'weather_section': -3, 'energy_section': -2, 'cameras_section': -1, 'scenes_section': 0, 'favorites_section': 1 };
+        return (p[a] ?? 10) - (p[b] ?? 10) || a.localeCompare(b);
       });
     }
 
-    // Render sections in order, pairing adjacent weather+energy in a side-by-side row
     const rendered = new Set<string>();
-    for (let i = 0; i < orderedSectionIds.length; i++) {
-      const sectionId = orderedSectionIds[i];
-      if (rendered.has(sectionId) || hiddenSections.includes(sectionId) || !availableSections.has(sectionId)) continue;
-
-      // Check if weather and energy are adjacent — pair them side-by-side
-      if ((sectionId === 'weather_section' || sectionId === 'energy_section') && hasWeather && hasEnergy) {
-        const otherSection = sectionId === 'weather_section' ? 'energy_section' : 'weather_section';
-        if (!rendered.has(otherSection) && !hiddenSections.includes(otherSection) && availableSections.has(otherSection)) {
-          // Find the next visible section after current
-          let nextVisible: string | null = null;
-          for (let j = i + 1; j < orderedSectionIds.length; j++) {
-            const nextId = orderedSectionIds[j];
-            if (!rendered.has(nextId) && !hiddenSections.includes(nextId) && availableSections.has(nextId)) {
-              nextVisible = nextId;
-              break;
-            }
-          }
-
-          if (nextVisible === otherSection) {
-            // Adjacent! Wrap in a side-by-side row
-            const wrapper = document.createElement('div');
-            wrapper.className = 'weather-energy-row';
-            container.appendChild(wrapper);
-            await availableSections.get(sectionId)!(wrapper);
-            await availableSections.get(otherSection)!(wrapper);
-            rendered.add(sectionId);
-            rendered.add(otherSection);
-            continue;
+    for (let i = 0; i < ids.length; i++) {
+      const sid = ids[i]; if (rendered.has(sid) || hidden.includes(sid) || !available.has(sid)) continue;
+      if ((sid === 'weather_section' || sid === 'energy_section') && available.has('weather_section') && available.has('energy_section')) {
+        const other = sid === 'weather_section' ? 'energy_section' : 'weather_section';
+        if (!rendered.has(other) && !hidden.includes(other)) {
+          let next = null; for (let j = i + 1; j < ids.length; j++) { if (!rendered.has(ids[j]) && !hidden.includes(ids[j]) && available.has(ids[j])) { next = ids[j]; break; } }
+          if (next === other) {
+            const wrap = document.createElement('div'); wrap.className = 'weather-energy-row'; wrap.style.display = 'flex'; wrap.style.gap = '12px'; container.appendChild(wrap);
+            await available.get(sid)!(wrap); await available.get(other)!(wrap);
+            rendered.add(sid); rendered.add(other); continue;
           }
         }
       }
-
-      await availableSections.get(sectionId)!();
-      rendered.add(sectionId);
+      await available.get(sid)!(); rendered.add(sid);
     }
   }
 
-  private applyCustomizations(entitiesByArea: { [areaId: string]: Entity[] }, customizations: any): { [areaId: string]: Entity[] } {
-    const result: { [areaId: string]: Entity[] } = {};
-    
-    // Apply area order customizations
-    const areaIds = Object.keys(entitiesByArea);
-    let sortedAreaIds = areaIds;
-    
-    if (customizations.home?.sections?.order) {
-      sortedAreaIds = [...areaIds].sort((a, b) => {
-        const aOrder = customizations.home.sections.order!.indexOf(a);
-        const bOrder = customizations.home.sections.order!.indexOf(b);
-        
-        // If both areas have custom order, use it
-        if (aOrder !== -1 && bOrder !== -1) {
-          return aOrder - bOrder;
-        }
-        // If only one has custom order, prioritize it
-        if (aOrder !== -1) return -1;
-        if (bOrder !== -1) return 1;
-        // If neither has custom order, keep original order
-        return 0;
+  private applyCustomizations(areas: { [aid: string]: Entity[] }, cust: any): { [aid: string]: Entity[] } {
+    const res: { [aid: string]: Entity[] } = {};
+    const ids = Object.keys(areas);
+    let sorted = ids;
+    if (cust.home?.sections?.order) sorted = [...ids].sort((a, b) => {
+      const ia = cust.home.sections.order.indexOf(a), ib = cust.home.sections.order.indexOf(b);
+      return (ia !== -1 && ib !== -1) ? ia - ib : (ia !== -1 ? -1 : (ib !== -1 ? 1 : 0));
+    });
+    for (const aid of sorted) {
+      const ents = [...areas[aid]]; const ord = cust.home?.entities_order?.[aid];
+      if (Array.isArray(ord) && ord.length > 0) ents.sort((a, b) => {
+        const ia = ord.indexOf(a.entity_id), ib = ord.indexOf(b.entity_id);
+        return (ia !== -1 && ib !== -1) ? ia - ib : (ia !== -1 ? -1 : (ib !== -1 ? 1 : 0));
       });
+      if (cust.home?.tall_cards) ents.forEach(e => { if (cust.home.tall_cards.includes(e.entity_id)) (e as any).is_tall = true; else if (cust.home.tall_cards.includes(`!${e.entity_id}`)) (e as any).is_tall = false; });
+      res[aid] = ents;
     }
-    
-    // Apply entity customizations within each area
-    for (const areaId of sortedAreaIds) {
-      const areaEntities = [...entitiesByArea[areaId]];
-      const areaCustomizations = customizations.home?.entities_order?.[areaId];
-      
-      if (areaCustomizations) {
-        // Apply entity order - areaCustomizations is now the array directly
-        const entityOrder = Array.isArray(areaCustomizations) ? areaCustomizations : [];
-        if (entityOrder.length > 0) {
-          areaEntities.sort((a, b) => {
-            const aOrder = entityOrder.indexOf(a.entity_id);
-            const bOrder = entityOrder.indexOf(b.entity_id);
-            
-            if (aOrder !== -1 && bOrder !== -1) {
-              return aOrder - bOrder;
-            }
-            if (aOrder !== -1) return -1;
-            if (bOrder !== -1) return 1;
-            return 0;
-          });
-        }
-      }
-        
-      // Apply tall card settings from home.tall_cards
-      if (customizations.home?.tall_cards) {
-        areaEntities.forEach(entity => {
-          if (customizations.home.tall_cards.includes(entity.entity_id)) {
-            (entity as any).is_tall = true;
-          } else if (customizations.home.tall_cards.includes(`!${entity.entity_id}`)) {
-            (entity as any).is_tall = false;
-          }
-        });
-      }
-      
-      result[areaId] = areaEntities;
-    }
-    
-    return result;
+    return res;
   }
 }

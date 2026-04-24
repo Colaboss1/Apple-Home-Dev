@@ -1,225 +1,71 @@
 import { CustomizationManager } from '../utils/CustomizationManager';
+import { CardManager } from '../utils/CardManager';
 import { DashboardConfig } from '../config/DashboardConfig';
 import { Entity, CardConfig } from '../types/types';
 import { localize } from '../utils/LocalizationService';
 
 export class FavoritesSection {
   private customizationManager: CustomizationManager;
+  private cardManager: CardManager;
 
-  constructor(customizationManager: CustomizationManager) {
-    this.customizationManager = customizationManager;
+  constructor(cm: CustomizationManager, cardManager?: CardManager) {
+    this.customizationManager = cm;
+    this.cardManager = cardManager || new CardManager(cm);
   }
 
-  async render(
-    container: HTMLElement,
-    allEntities: Entity[],
-    hass: any,
-    onTallToggle?: (entityId: string, areaId: string) => void | Promise<void | boolean>
-  ): Promise<void> {
-    // Get favorite accessories from settings
-    const favoriteAccessories = await this.customizationManager.getFavoriteAccessories();
-    
-    if (favoriteAccessories.length === 0) {
-      return; // Don't render if no favorites
-    }
-
-    // Get extra accessories to also allow them as favorites
-    const extraAccessories = await this.customizationManager.getExtraAccessories();
-
-    // Filter entities to only show favorites that exist and are supported (or manually included)
-    const favoriteEntities = favoriteAccessories
-      .map((entityId: string) => {
-        const state = hass.states[entityId];
-        if (!state) {
-          return null;
-        }
-        
-        // Check if entity is hidden in the entity registry
-        const entityRegistry = hass.entities?.[entityId];
-        if (entityRegistry && entityRegistry.hidden_by) {
-          return null;
-        }
-        
-        // Check if entity is disabled in the entity registry
-        if (entityRegistry && entityRegistry.disabled_by) {
-          return null;
-        }
-        
-        const domain = entityId.split('.')[0];
-        
-        // Allow entity if it's a supported domain OR if it's in the extraAccessories list
-        const isManuallyIncluded = extraAccessories.includes(entityId);
-        if (!DashboardConfig.isSupportedDomain(domain) && !isManuallyIncluded) {
-          return null;
-        }
-        
-        return {
-          entity_id: entityId,
-          name: state.attributes.friendly_name || entityId,
-          area_id: state.attributes.area_id || 'favorites_section', // Use special area for favorites
-          domain: domain
-        };
-      })
-      .filter(Boolean) as Entity[];
-
-    if (favoriteEntities.length === 0) {
-      return; // Don't render if no valid favorites
-    }
-
-    // Add favorites section title
-    const titleDiv = document.createElement('div');
-    titleDiv.className = 'apple-home-section-title';
-    titleDiv.innerHTML = `<span>${localize('section_titles.favorites')}</span>`;
-    container.appendChild(titleDiv);
-
-    // Create cards container using the same class as AreaSection
-    const cardsContainer = document.createElement('div');
-    cardsContainer.className = 'area-entities'; // Use same class as other sections
-    cardsContainer.dataset.areaId = 'favorites'; // Set area ID for customizations
-    container.appendChild(cardsContainer);
-
-    // Apply saved card order if available
-    const savedOrder = this.customizationManager.getSavedCardOrderWithContext('favorites', 'home');
-    let orderedEntities = [...favoriteEntities];
-    
-    if (savedOrder && savedOrder.length > 0) {
-      orderedEntities = this.customizationManager.applySavedCardOrder(favoriteEntities, savedOrder);
-    }
-
-    // Create cards for each favorite entity in the correct order
-    for (const entity of orderedEntities) {
-      await this.createAndAppendCard(entity, cardsContainer, hass, onTallToggle);
-    }
+  async render(container: HTMLElement, all: Entity[], hass: any, onTallToggle?: (eid: string, aid: string) => void | Promise<void | boolean>): Promise<void> {
+    const favorites = await this.customizationManager.getFavoriteAccessories(); if (favorites.length === 0) return;
+    const extra = await this.customizationManager.getExtraAccessories();
+    const entities = favorites.map((id: string) => {
+      const s = hass.states[id], reg = hass.entities?.[id]; if (!s || (reg && (reg.hidden_by || reg.disabled_by))) return null;
+      const dom = id.split('.')[0]; if (!DashboardConfig.isSupportedDomain(dom) && !extra.includes(id)) return null;
+      return { entity_id: id, name: s.attributes.friendly_name || id, area_id: 'favorites', domain: dom };
+    }).filter(Boolean) as Entity[];
+    if (entities.length === 0) return;
+    const title = document.createElement('div'); title.className = 'apple-home-section-title';
+    title.innerHTML = `<span>${localize('section_titles.favorites')}</span>`;
+    container.appendChild(title);
+    const grid = document.createElement('div'); grid.className = 'area-entities'; grid.dataset.areaId = 'favorites';
+    container.appendChild(grid);
+    const saved = this.customizationManager.getSavedCardOrderWithContext('favorites', 'home');
+    const ordered = saved?.length ? this.customizationManager.applySavedCardOrder(entities, saved) : [...entities];
+    for (const e of ordered) await this.createAndAppendCard(e, grid, hass, onTallToggle);
   }
 
-  private async createAndAppendCard(
-    entity: Entity,
-    container: HTMLElement,
-    hass: any,
-    onTallToggle?: (entityId: string, areaId: string) => void | Promise<void | boolean>
-  ): Promise<void> {
+  private async createAndAppendCard(e: Entity, container: HTMLElement, hass: any, onTallToggle?: (eid: string, aid: string) => void | Promise<void | boolean>): Promise<void> {
     try {
-      // Create card config using the same pattern as AreaSection
-      const cardConfig = this.createEntityCard(entity.entity_id, hass, entity);
-      if (!cardConfig) {
-        console.warn(`Failed to create card config for entity: ${entity.entity_id}`);
-        return;
-      }
-
-      // Use the same card creation logic as AreaSection
-      let cardElement: HTMLElement;
-      
-      if (cardConfig.type === 'custom:apple-home-card') {
-        cardElement = document.createElement('apple-home-card') as HTMLElement;
-        
-        // For favorites, always use regular size (not tall)
-        const configWithTall = { ...cardConfig, is_tall: false };
-        
-        (cardElement as any).setConfig(configWithTall);
-        (cardElement as any).hass = hass;
+      const cfg = this.createEntityCard(e.entity_id, hass); if (!cfg) return;
+      let el: HTMLElement;
+      if (cfg.type === 'custom:apple-home-card') {
+        el = document.createElement('apple-home-card') as HTMLElement;
+        const tall = this.cardManager.shouldCardBeTall(cfg.entity, 'favorites', 'home');
+        const finalCfg = { ...cfg, is_tall: tall }; if (cfg.default_icon) finalCfg.default_icon = cfg.default_icon;
+        (el as any).setConfig(finalCfg); (el as any).hass = hass;
       } else {
-        // Handle other card types (same as AreaSection)
-        const customCardType = cardConfig.type.replace('custom:', '');
-        if (customElements.get(customCardType)) {
-          cardElement = document.createElement(customCardType);
-          if (cardElement && typeof (cardElement as any).setConfig === 'function') {
-            (cardElement as any).setConfig(cardConfig);
-            (cardElement as any).hass = hass;
-          }
-        } else {
-          cardElement = document.createElement('div');
-          cardElement.innerHTML = `<div style="color: red;">Unknown card type: ${cardConfig.type}</div>`;
-        }
+        const type = cfg.type.replace('custom:', '');
+        if (customElements.get(type)) { el = document.createElement(type); if (el && typeof (el as any).setConfig === 'function') { (el as any).setConfig(cfg); (el as any).hass = hass; } }
+        else { el = document.createElement('div'); el.className = 'error-placeholder'; el.innerHTML = `<div style="color:red;padding:10px;background:rgba(255,0,0,0.1);border-radius:10px;">Unknown: ${cfg.type}</div>`; }
       }
-      
-      const wrapper = document.createElement('div');
-      wrapper.className = 'entity-card-wrapper';
-      wrapper.dataset.entityId = cardConfig.entity;
-      
-      // Favorites are always regular size, never tall
-      // Don't add tall class
-      
-      // Add hide/remove button (top-left, Apple-style minus circle)
-      // For favorites, this button removes the item from favorites
-      const hideBtn = document.createElement('button');
-      hideBtn.className = 'entity-control-btn entity-hide-btn';
-      hideBtn.dataset.action = 'hide-entity';
-      hideBtn.title = 'Remove from Favorites';
-      hideBtn.innerHTML = `<ha-icon icon="mdi:minus"></ha-icon>`;
-      hideBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        // Dispatch custom event for AppleHomeView to handle
-        wrapper.dispatchEvent(new CustomEvent('apple-home-hide-entity', {
-          bubbles: true,
-          composed: true,
-          detail: { 
-            entityId: cardConfig.entity,
-            areaId: 'favorites'
-          }
-        }));
-      });
-      
-      wrapper.appendChild(hideBtn);
-      wrapper.appendChild(cardElement);
-      container.appendChild(wrapper);
-    } catch (error) {
-      console.error(`Error creating card for entity ${entity.entity_id}:`, error);
-    }
+      const wrap = document.createElement('div'); wrap.className = 'entity-card-wrapper'; wrap.dataset.entityId = cfg.entity;
+      const isTall = this.cardManager.shouldCardBeTall(cfg.entity, 'favorites', 'home');
+      if (isTall) wrap.classList.add('tall');
+      const ctrls = document.createElement('div'); ctrls.className = 'entity-controls';
+      const domain = cfg.entity ? cfg.entity.split('.')[0] : '';
+      if (!['camera', 'scene', 'script', 'automation'].includes(domain)) {
+        ctrls.innerHTML = `<button class="entity-control-btn tall-toggle ${isTall ? 'active' : ''}" data-action="toggle-tall"><ha-icon icon="mdi:${isTall ? 'arrow-collapse' : 'arrow-expand'}"></ha-icon></button>`;
+        const btn = ctrls.querySelector('.tall-toggle') as HTMLButtonElement;
+        if (btn && onTallToggle) btn.addEventListener('click', (ev) => { ev.stopPropagation(); onTallToggle(cfg.entity, 'favorites'); });
+      }
+      const hide = document.createElement('button'); hide.className = 'entity-control-btn entity-hide-btn'; hide.dataset.action = 'hide-entity'; hide.innerHTML = `<ha-icon icon="mdi:minus"></ha-icon>`;
+      hide.addEventListener('click', (ev) => { ev.stopPropagation(); wrap.dispatchEvent(new CustomEvent('apple-home-hide-entity', { bubbles: true, composed: true, detail: { entityId: cfg.entity, areaId: 'favorites' } })); });
+      wrap.appendChild(hide); wrap.appendChild(ctrls); wrap.appendChild(el!); container.appendChild(wrap);
+    } catch (err) { console.error('Error creating card in FavoritesSection:', err); }
   }
 
-  private createEntityCard(entityId: string, hass: any, entity?: Entity): CardConfig | null {
-    const state = hass.states[entityId];
-    if (!state) {
-      console.warn(`Entity ${entityId} not found in hass.states`);
-      return null;
-    }
-
-    const domain = entityId.split('.')[0];
-    let friendlyName = state.attributes?.friendly_name || entityId;
-    
-    // Determine card type and properties
-    let cardType = 'custom:apple-home-card';
-    let isTallCard = false; // Favorites are always regular size
-    
-    const card: CardConfig = {
-      type: cardType,
-      entity: entityId,
-      name: friendlyName,
-      domain: domain,
-      is_tall: isTallCard
-    };
-    
-    // Add default icon for scenes/scripts without icons
-    if (DashboardConfig.isScenesDomain(domain) && !state.attributes?.icon) {
-      (card as any).default_icon = 'mdi:home';
-    }
-    
-    return card;
-  }
-
-  private applyCardStyling(cardElement: any, entity: Entity): void {
-    const state = cardElement.hass.states[entity.entity_id];
-    if (!state) return;
-    
-    const domain = entity.entity_id.split('.')[0];
-    const entityData = DashboardConfig.getEntityData(state, domain, false, false, cardElement.hass);
-    
-    if (entityData) {
-      const styles = {
-        '--card-primary-color': entityData.textColor,
-        '--card-background-color': entityData.backgroundColor,
-        '--primary-text-color': entityData.textColor,
-        '--secondary-text-color': entityData.textColor + '80',
-        '--icon-color': entityData.iconColor,
-        '--rgb-primary-color': entityData.iconBackgroundColor,
-        '--mush-rgb-primary': entityData.iconBackgroundColor?.replace('#', '').match(/.{2}/g)?.map(x => parseInt(x, 16)).join(', ') || '255, 175, 0'
-      };
-      
-      Object.entries(styles).forEach(([property, value]) => {
-        if (value) {
-          cardElement.style.setProperty(property, value);
-        }
-      });
-    }
+  private createEntityCard(id: string, hass: any): CardConfig | null {
+    const s = hass.states[id]; if (!s) return null; const dom = id.split('.')[0];
+    const c: CardConfig = { type: 'custom:apple-home-card', entity: id, name: s.attributes?.friendly_name || id, domain: dom, is_tall: false };
+    if (DashboardConfig.isScenesDomain(dom) && !s.attributes?.icon) (c as any).default_icon = 'mdi:home';
+    return c;
   }
 }

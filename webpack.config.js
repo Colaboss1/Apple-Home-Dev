@@ -1,12 +1,14 @@
 const path = require('path');
+const webpack = require('webpack');
 const TerserPlugin = require('terser-webpack-plugin');
 
 module.exports = {
   mode: 'production',
   entry: './src/apple-home-strategy.ts',
   output: {
+    clean: true,
     filename: 'apple-home-dashboard.js',
-    path: path.resolve(__dirname, './'),
+    path: path.resolve(__dirname, 'dist'),
   },
   resolve: {
     extensions: ['.ts', '.js'],
@@ -29,7 +31,7 @@ module.exports = {
     ],
   },
   plugins: [
-    new (require('webpack')).optimize.LimitChunkCountPlugin({
+    new webpack.optimize.LimitChunkCountPlugin({
       maxChunks: 1,
     }),
   ],

@@ -12,282 +12,98 @@ export class AreaSection {
   private _areasCache: Area[] | null = null;
   private _areasCacheHass: any = null;
 
-  constructor(customizationManager: CustomizationManager, cardManager?: CardManager) {
-    this.customizationManager = customizationManager;
-    this.cardManager = cardManager || new CardManager(customizationManager);
+  constructor(cm: CustomizationManager, cardManager?: CardManager) {
+    this.customizationManager = cm;
+    this.cardManager = cardManager || new CardManager(cm);
   }
 
-  // Cache areas per hass instance to avoid repeated WS calls within the same render cycle
   private async getCachedAreas(hass: any): Promise<Area[]> {
-    if (this._areasCache && this._areasCacheHass === hass) {
-      return this._areasCache;
-    }
+    if (this._areasCache && this._areasCacheHass === hass) return this._areasCache;
     this._areasCache = await DataService.getAreas(hass);
     this._areasCacheHass = hass;
     return this._areasCache;
   }
 
-  async renderSingleArea(
-    container: HTMLElement,
-    areaId: string,
-    areaEntities: Entity[],
-    hass: any,
-    onTallToggle?: (entityId: string, areaId: string) => void | Promise<void | boolean>,
-    context: string = 'home',
-    enableNavigation: boolean = true
-  ): Promise<void> {
-    if (areaEntities.length === 0) return;
-
-    // Get area name (cached per render cycle)
-    let areaName = areaId;
-    if (areaId !== 'no_area') {
-      try {
-        const areas = await this.getCachedAreas(hass);
-        const area = areas.find((a: Area) => a.area_id === areaId);
-        areaName = area?.name || areaId;
-      } catch (error) {
-        // Silently handle error
-      }
-    } else {
-      areaName = localize('section_titles.default_room');
+  async renderSingleArea(container: HTMLElement, aid: string, entities: Entity[], hass: any, onTallToggle?: (eid: string, aid: string) => void | Promise<void | boolean>, ctx: string = 'home', enableNav: boolean = true): Promise<void> {
+    if (!entities?.length) return;
+    let name = aid; if (aid !== 'no_area') { try { const areas = await this.getCachedAreas(hass); name = areas.find((a: Area) => a.area_id === aid)?.name || aid; } catch {} } else name = localize('section_titles.default_room');
+    const title = document.createElement('div'); title.className = 'area-title';
+    if (enableNav) {
+      const wrap = document.createElement('div'); wrap.className = 'clickable-section-title';
+      wrap.innerHTML = `<span>${name}</span><ha-icon icon="${RTLHelper.isRTL() ? 'mdi:chevron-left' : 'mdi:chevron-right'}" class="section-arrow"></ha-icon>`;
+      wrap.addEventListener('click', () => this.navigateToPath(`room-${aid}`));
+      title.appendChild(wrap);
+    } else title.innerHTML = `<span>${name}</span>`;
+    container.appendChild(title);
+    const grid = document.createElement('div'); grid.className = 'area-entities'; grid.dataset.areaId = aid;
+    const saved = this.customizationManager.getSavedCardOrderWithContext(aid, ctx);
+    let ordered = saved?.length ? this.customizationManager.applySavedCardOrder(entities, saved) : [...entities];
+    for (const e of ordered) {
+      const cfg = this.createEntityCard(e.entity_id, hass, name, e);
+      if (cfg) await this.createAndAppendCard(cfg, grid, hass, onTallToggle, ctx);
     }
-    
-    // Add area title with conditional navigation
-    const titleDiv = document.createElement('div');
-    titleDiv.className = 'area-title';
-    
-    if (enableNavigation) {
-      // Create clickable wrapper for just the title text and chevron
-      const clickableWrapper = document.createElement('div');
-      clickableWrapper.className = 'clickable-section-title';
-      clickableWrapper.innerHTML = `<span>${areaName}</span><ha-icon icon="${RTLHelper.isRTL() ? 'mdi:chevron-left' : 'mdi:chevron-right'}" class="section-arrow"></ha-icon>`;
-      
-      // Add click handler to the wrapper
-      clickableWrapper.addEventListener('click', () => {
-        this.navigateToPath(`room-${areaId}`);
-      });
-      
-      titleDiv.appendChild(clickableWrapper);
-    } else {
-      titleDiv.innerHTML = `<span>${areaName}</span>`;
-    }
-    
-    container.appendChild(titleDiv);
-    
-    // Create area grid
-    const gridDiv = document.createElement('div');
-    gridDiv.className = 'area-entities';
-    gridDiv.dataset.areaId = areaId;
-    
-    // Apply saved card order if available
-    const savedOrder = this.customizationManager.getSavedCardOrderWithContext(areaId, context);
-    let orderedCards = [...areaEntities];
-    
-    if (savedOrder && savedOrder.length > 0) {
-      orderedCards = this.customizationManager.applySavedCardOrder(areaEntities, savedOrder);
-    }
-    
-    // Create entity cards for this area
-    for (const entity of orderedCards) {
-      const cardConfig = this.createEntityCard(entity.entity_id, hass, areaName, entity);
-      if (cardConfig) {
-        await this.createAndAppendCard(cardConfig, gridDiv, hass, onTallToggle, context);
-      }
-    }
-    
-    container.appendChild(gridDiv);
+    container.appendChild(grid);
   }
 
-  private createEntityCard(entityId: string, hass: any, areaName?: string, entity?: Entity): CardConfig | null {
-    const state = hass.states[entityId];
-    if (!state) {
-      return null;
+  private createEntityCard(eid: string, hass: any, areaName?: string, entity?: Entity): CardConfig | null {
+    const s = hass.states[eid]; if (!s) return null;
+    let name = s.attributes?.friendly_name || eid.split('.')[1].replace(/_/g, ' '); const dom = eid.split('.')[0];
+    if (areaName && name.includes(areaName)) {
+      const esc = areaName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), clean = name.replace(new RegExp(`^${esc}\\s+`, 'i'), '').replace(new RegExp(`\\s+${esc}$`, 'i'), '').replace(new RegExp(`\\s+${esc}\\s+`, 'i'), ' ').trim();
+      if (clean && clean.toLowerCase() !== areaName.toLowerCase()) name = clean;
     }
-    
-    let friendlyName = state?.attributes?.friendly_name || entityId.split('.')[1].replace(/_/g, ' ');
-    const domain = entityId.split('.')[0];
-    
-    // Remove area name from entity name to avoid redundancy
-    if (areaName && friendlyName.includes(areaName)) {
-      const escaped = areaName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      const cleanName = friendlyName
-        .replace(new RegExp(`^${escaped}\\s+`, 'i'), '')
-        .replace(new RegExp(`\\s+${escaped}$`, 'i'), '')
-        .replace(new RegExp(`\\s+${escaped}\\s+`, 'i'), ' ')
-        .trim();
-      
-      if (cleanName && cleanName.length > 0 && cleanName.toLowerCase() !== areaName.toLowerCase()) {
-        friendlyName = cleanName;
-      }
-    }
-    
-    // Determine card type and properties
-    let cardType = 'custom:apple-home-card';
-    let isTallCard = false;
-    
-    // Check if domain should be tall by default
-    if (DashboardConfig.isDefaultTallDomain(domain)) {
-      isTallCard = true;
-    }
-    
-    // Check if there's a custom tall card setting from customizations
-    if (entity && typeof (entity as any).is_tall !== 'undefined') {
-      isTallCard = (entity as any).is_tall;
-    }
-    
-    const card: CardConfig = {
-      type: cardType,
-      entity: entityId,
-      name: friendlyName,
-      domain: domain,
-      is_tall: isTallCard
-    };
-    
-    // Add default icon for scenes/scripts without icons
-    if (DashboardConfig.isScenesDomain(domain) && !state.attributes?.icon) {
-      (card as any).default_icon = 'mdi:home';
-    }
-    
-    return card;
+    let tall = DashboardConfig.isDefaultTallDomain(dom);
+    if (entity && typeof (entity as any).is_tall !== 'undefined') tall = (entity as any).is_tall;
+    else if (this.cardManager) tall = this.cardManager.shouldCardBeTall(eid, 'unknown', 'home');
+    const c: CardConfig = { type: 'custom:apple-home-card', entity: eid, name, domain: dom, is_tall: tall };
+    if (DashboardConfig.isScenesDomain(dom) && !s.attributes?.icon) (c as any).default_icon = 'mdi:home';
+    return c;
   }
 
-  private async createAndAppendCard(
-    cardConfig: any,
-    container: HTMLElement,
-    hass: any,
-    onTallToggle?: (entityId: string, areaId: string) => void | Promise<void | boolean>,
-    context: string = 'home'
-  ): Promise<void> {
+  private async createAndAppendCard(cfg: any, container: HTMLElement, hass: any, onTallToggle?: (eid: string, aid: string) => void | Promise<void | boolean>, ctx: string = 'home'): Promise<void> {
     try {
-      let cardElement: HTMLElement;
-      
-      if (cardConfig.type === 'custom:apple-home-card') {
-        cardElement = document.createElement('apple-home-card') as HTMLElement;
-        
-        // Determine if card should be tall based on customizations
-        const shouldBeTall = this.cardManager.shouldCardBeTall(cardConfig.entity, container.dataset.areaId || 'unknown', context);
-        const configWithTall = { ...cardConfig, is_tall: shouldBeTall };
-        
-        // Add default icon if specified
-        if ((cardConfig as any).default_icon) {
-          configWithTall.default_icon = (cardConfig as any).default_icon;
-        }
-        
-        (cardElement as any).setConfig(configWithTall);
-        (cardElement as any).hass = hass;
+      let el: HTMLElement;
+      if (cfg.type === 'custom:apple-home-card') {
+        el = document.createElement('apple-home-card') as HTMLElement;
+        const tall = this.cardManager.shouldCardBeTall(cfg.entity, container.dataset.areaId || 'unknown', ctx);
+        const finalCfg = { ...cfg, is_tall: tall };
+        if (cfg.default_icon) finalCfg.default_icon = cfg.default_icon;
+        (el as any).setConfig(finalCfg); (el as any).hass = hass;
       } else {
-        // Handle other card types
-        const customCardType = cardConfig.type.replace('custom:', '');
-        if (customElements.get(customCardType)) {
-          cardElement = document.createElement(customCardType);
-          if (cardElement && typeof (cardElement as any).setConfig === 'function') {
-            (cardElement as any).setConfig(cardConfig);
-            (cardElement as any).hass = hass;
-          }
-        } else {
-          cardElement = document.createElement('div');
-          cardElement.innerHTML = `<div style="color: red;">Unknown card type: ${cardConfig.type}</div>`;
-        }
+        const type = cfg.type.replace('custom:', '');
+        if (customElements.get(type)) { el = document.createElement(type); if (el && typeof (el as any).setConfig === 'function') { (el as any).setConfig(cfg); (el as any).hass = hass; } }
+        else { el = document.createElement('div'); el.className = 'error-placeholder'; el.innerHTML = `<div style="color:red;padding:10px;background:rgba(255,0,0,0.1);border-radius:10px;">Unknown: ${cfg.type}</div>`; }
       }
-      
-      const wrapper = document.createElement('div');
-      wrapper.className = 'entity-card-wrapper';
-      wrapper.dataset.entityId = cardConfig.entity;
-      
-      // Determine if card should be tall based on customizations
-      const shouldBeTall = this.cardManager.shouldCardBeTall(cardConfig.entity, container.dataset.areaId || 'unknown', context);
-      
-      if (shouldBeTall) {
-        wrapper.classList.add('tall');
+      const wrap = document.createElement('div'); wrap.className = 'entity-card-wrapper';
+      wrap.dataset.entityId = cfg.entity; wrap.dataset.areaId = container.dataset.areaId || 'unknown';
+      const isTall = this.cardManager.shouldCardBeTall(cfg.entity, container.dataset.areaId || 'unknown', ctx);
+      if (isTall) wrap.classList.add('tall');
+      const ctrls = document.createElement('div'); ctrls.className = 'entity-controls';
+      const domain = cfg.entity ? cfg.entity.split('.')[0] : '';
+      if (!['camera', 'scene', 'script', 'automation'].includes(domain)) {
+        ctrls.innerHTML = `<button class="entity-control-btn tall-toggle ${isTall ? 'active' : ''}" data-action="toggle-tall"><ha-icon icon="mdi:${isTall ? 'arrow-collapse' : 'arrow-expand'}"></ha-icon></button>`;
+        const btn = ctrls.querySelector('.tall-toggle') as HTMLButtonElement;
+        if (btn && onTallToggle) btn.addEventListener('click', (e) => { e.stopPropagation(); onTallToggle(cfg.entity, container.dataset.areaId || 'unknown'); });
       }
-      
-      // Always add edit mode controls (top-right: tall toggle)
-      const controlsDiv = document.createElement('div');
-      controlsDiv.className = 'entity-controls';
-      
-      let controlsHTML = '';
-      
-      // Get entity domain to check if it's a camera or scene
-      const entityDomain = cardConfig.entity ? cardConfig.entity.split('.')[0] : '';
-      const isFixedSizeEntity = ['camera', 'scene', 'script'].includes(entityDomain);
-      
-      // Only show tall toggle for regular entities (not cameras or scenes)
-      if (!isFixedSizeEntity) {
-        controlsHTML = `
-          <button class="entity-control-btn tall-toggle ${shouldBeTall ? 'active' : ''}" 
-                  data-action="toggle-tall" 
-                  title="Toggle card design">
-            <ha-icon icon="mdi:${shouldBeTall ? 'arrow-collapse' : 'arrow-expand'}"></ha-icon>
-          </button>
-        `;
-      }
-      
-      controlsDiv.innerHTML = controlsHTML;
-      
-      // Add event listeners for controls
-      const tallToggle = controlsDiv.querySelector('.tall-toggle') as HTMLButtonElement;
-      if (tallToggle && onTallToggle) {
-        tallToggle.addEventListener('click', (e) => {
-          e.stopPropagation();
-          onTallToggle(cardConfig.entity, container.dataset.areaId || 'unknown');
-        });
-      }
-      
-      // Add hide/remove button (top-left, Apple-style minus circle)
-      const hideBtn = document.createElement('button');
-      hideBtn.className = 'entity-control-btn entity-hide-btn';
-      hideBtn.dataset.action = 'hide-entity';
-      hideBtn.title = 'Hide from Home';
-      hideBtn.innerHTML = `<ha-icon icon="mdi:minus"></ha-icon>`;
-      hideBtn.addEventListener('click', (e) => {
+      const hide = document.createElement('button'); hide.className = 'entity-control-btn entity-hide-btn';
+      hide.dataset.action = 'hide-entity'; hide.innerHTML = `<ha-icon icon="mdi:minus"></ha-icon>`;
+      hide.addEventListener('click', (e) => {
         e.stopPropagation();
-        // Dispatch custom event for AppleHomeView to handle
-        wrapper.dispatchEvent(new CustomEvent('apple-home-hide-entity', {
-          bubbles: true,
-          composed: true,
-          detail: { 
-            entityId: cardConfig.entity,
-            areaId: container.dataset.areaId || 'unknown'
-          }
-        }));
+        wrap.dispatchEvent(new CustomEvent('apple-home-hide-entity', { bubbles: true, composed: true, detail: { entityId: cfg.entity, areaId: container.dataset.areaId || 'unknown' } }));
       });
-      
-      wrapper.appendChild(hideBtn);
-      wrapper.appendChild(controlsDiv);
-      wrapper.appendChild(cardElement);
-      container.appendChild(wrapper);
-      
-    } catch (error) {
-      console.error('Error creating card:', error);
-    }
+      wrap.appendChild(hide); wrap.appendChild(ctrls); wrap.appendChild(el!); container.appendChild(wrap);
+    } catch (err) { console.error('Error creating card:', err); }
   }
 
-  private navigateToPath(path: string) {
-    const currentPath = window.location.pathname;
-    let basePath = '';
-    
-    // Handle different dashboard URL patterns
-    if (currentPath.startsWith('/lovelace/')) {
-      basePath = '/lovelace/';
-    } else if (currentPath === '/lovelace') {
-      basePath = '/lovelace/';
-    } else {
-      // Custom dashboard: extract the dashboard name
-      const pathParts = currentPath.split('/').filter(part => part.length > 0);
-      if (pathParts.length > 0) {
-        basePath = `/${pathParts[0]}/`;
-      } else {
-        basePath = '/lovelace/';
-      }
+  private navigateToPath(p: string) {
+    const cur = window.location.pathname;
+    let base = '';
+    if (cur.startsWith('/lovelace/') || cur === '/lovelace') base = '/lovelace/';
+    else { const parts = cur.split('/').filter(x => x.length > 0); base = parts.length > 0 ? `/${parts[0]}/` : '/lovelace/'; }
+    const url = `${base}${p.startsWith('/') ? p.slice(1) : p}`;
+    if (url !== cur) {
+      window.history.pushState(null, '', url);
+      window.dispatchEvent(new Event('location-changed', { bubbles: true, composed: true }));
     }
-    
-    // Clean path and construct full URL
-    const cleanPath = path.startsWith('/') ? path.slice(1) : path;
-    const newUrl = `${basePath}${cleanPath}`;
-    
-    // Navigate using Home Assistant's system
-    window.history.pushState(null, '', newUrl);
-    const event = new Event('location-changed', { bubbles: true, composed: true });
-    window.dispatchEvent(event);
   }
 }

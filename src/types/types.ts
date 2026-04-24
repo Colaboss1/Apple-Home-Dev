@@ -36,7 +36,7 @@ export interface CardConfig {
 }
 
 export interface DashboardInfo {
-  hass: any; // HomeAssistant instance
+  hass: any;
 }
 
 export interface Area {
@@ -82,10 +82,6 @@ export interface EntityState {
 export enum CardDesignType {
   REGULAR = 'regular',
   TALL = 'tall',
-  // Future design types can be added here
-  // COMPACT = 'compact',
-  // WIDE = 'wide',
-  // MINIMAL = 'minimal'
 }
 
 export interface LovelaceStrategyConfig {

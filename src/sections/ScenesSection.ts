@@ -1,434 +1,111 @@
 import { CustomizationManager } from '../utils/CustomizationManager';
 import { CardManager } from '../utils/CardManager';
-import { DataService } from '../utils/DataService';
 import { Entity, CardConfig } from '../types/types';
 import { DashboardConfig } from '../config/DashboardConfig';
 import { localize } from '../utils/LocalizationService';
 import { RTLHelper } from '../utils/RTLHelper';
+import { DragAndDropManager } from '../utils/DragAndDropManager';
 
 export class ScenesSection {
   private customizationManager: CustomizationManager;
   private cardManager: CardManager;
 
-  constructor(customizationManager: CustomizationManager, cardManager?: CardManager) {
-    this.customizationManager = customizationManager;
-    this.cardManager = cardManager || new CardManager(customizationManager);
+  constructor(cm: CustomizationManager, cardManager?: CardManager) {
+    this.customizationManager = cm;
+    this.cardManager = cardManager || new CardManager(cm);
   }
 
-  async render(
-    container: HTMLElement,
-    scenesEntities: Entity[],
-    hass: any,
-    onTallToggle?: (entityId: string, areaId: string) => void | Promise<void | boolean>,
-    context: string = 'home',
-    enableNavigation: boolean = true
-  ): Promise<void> {
-    // Sort scenes by last used (if available)
-    const sortedScenes = await this.sortScenesByLastUsed(scenesEntities, hass, 'scenes_section', context);
-    
-    // Add scenes section title with navigation
-    const titleDiv = document.createElement('div');
-    titleDiv.className = 'apple-home-section-title';
-    
-    if (enableNavigation) {
-      // Create clickable wrapper for just the title text and chevron
-      const clickableWrapper = document.createElement('div');
-      clickableWrapper.className = 'clickable-section-title';
-      clickableWrapper.innerHTML = `<span>${localize('section_titles.scenes')}</span><ha-icon icon="${RTLHelper.isRTL() ? 'mdi:chevron-left' : 'mdi:chevron-right'}" class="section-arrow"></ha-icon>`;
-      
-      // Add click handler to the wrapper
-      clickableWrapper.addEventListener('click', () => {
-        this.navigateToPath('scenes');
-      });
-      
-      titleDiv.appendChild(clickableWrapper);
-    } else {
-      titleDiv.innerHTML = `<span>${localize('section_titles.scenes')}</span>`;
+  async render(container: HTMLElement, scenes: Entity[], hass: any, onTallToggle?: (eid: string, aid: string) => void | Promise<void | boolean>, ctx: string = 'home', enableNav: boolean = true): Promise<void> {
+    if (!scenes?.length) return;
+    const sorted = await this.sortScenesByLastUsed(scenes, hass, 'scenes_section', ctx);
+    const title = document.createElement('div'); title.className = 'apple-home-section-title';
+    if (enableNav) {
+      const wrap = document.createElement('div'); wrap.className = 'clickable-section-title';
+      wrap.innerHTML = `<span>${localize('section_titles.scenes')}</span><ha-icon icon="${RTLHelper.isRTL() ? 'mdi:chevron-left' : 'mdi:chevron-right'}" class="section-arrow"></ha-icon>`;
+      wrap.addEventListener('click', () => this.navigateToPath('scenes'));
+      title.appendChild(wrap);
+    } else title.innerHTML = `<span>${localize('section_titles.scenes')}</span>`;
+    container.appendChild(title);
+    const carouselContainer = document.createElement('div'); carouselContainer.className = 'carousel-container';
+    const grid = document.createElement('div'); grid.className = 'carousel-grid scenes';
+    grid.dataset.areaId = 'scenes_section'; grid.dataset.sectionType = 'scenes';
+    for (const e of sorted) {
+      const cfg = this.createEntityCard(e.entity_id, hass, e);
+      if (cfg) { cfg.section_type = 'scenes'; await this.createAndAppendCard(cfg, grid, hass, onTallToggle, ctx); }
     }
-    
-    container.appendChild(titleDiv);
-    
-    // Create carousel container
-    const carouselContainer = document.createElement('div');
-    carouselContainer.className = 'carousel-container';
-    
-    const carouselGrid = document.createElement('div');
-    carouselGrid.className = 'carousel-grid scenes';
-    carouselGrid.dataset.areaId = 'scenes_section';
-    carouselGrid.dataset.sectionType = 'scenes';
-    
-    // Create scene cards
-    for (const entity of sortedScenes) {
-      const cardConfig = this.createEntityCard(entity.entity_id, hass, entity);
-      if (cardConfig) {
-        cardConfig.section_type = 'scenes';
-        await this.createAndAppendCard(cardConfig, carouselGrid, hass, onTallToggle, context);
-      }
-    }
-    
-    carouselContainer.appendChild(carouselGrid);
-    
-    // Add click-and-drag scrolling for desktop users
-    this.setupDragScroll(carouselContainer);
-    
-    container.appendChild(carouselContainer);
+    carouselContainer.appendChild(grid); this.setupDragScroll(carouselContainer); container.appendChild(carouselContainer);
   }
 
-  private async sortScenesByLastUsed(scenesEntities: Entity[], hass: any, areaId: string, context: string = 'home'): Promise<Entity[]> {
+  private async sortScenesByLastUsed(ents: Entity[], hass: any, aid: string, ctx: string = 'home'): Promise<Entity[]> {
     try {
-      // First check if there's a saved manual order for scenes
-      const savedOrder = this.customizationManager.getSavedCarouselOrderWithContext(areaId, 'scenes', context);
-      if (savedOrder && savedOrder.length > 0) {
-        // Apply saved order, similar to how regular cards are ordered
-        const entityMap = new Map(scenesEntities.map(entity => [entity.entity_id, entity]));
-        const orderedScenes: Entity[] = [];
-        
-        // First, add scenes in the saved order
-        savedOrder.forEach((entityId: string) => {
-          if (entityMap.has(entityId)) {
-            orderedScenes.push(entityMap.get(entityId)!);
-            entityMap.delete(entityId); // Remove from map to avoid duplicates
-          }
-        });
-        
-        // Then, add any new scenes that weren't in the saved order (sorted by last used)
-        const remainingScenes = Array.from(entityMap.values());
-        if (remainingScenes.length > 0) {
-          const sortedRemaining = await this.sortScenesByLastUsed(remainingScenes, hass, areaId);
-          orderedScenes.push(...sortedRemaining);
-        }
-        
-        return orderedScenes;
+      const saved = this.customizationManager.getSavedCarouselOrderWithContext(aid, 'scenes', ctx);
+      if (saved?.length) {
+        const map = new Map(ents.map(e => [e.entity_id, e])), ordered: Entity[] = [];
+        saved.forEach((id: string) => { if (map.has(id)) { ordered.push(map.get(id)!); map.delete(id); } });
+        const remaining = Array.from(map.values());
+        if (remaining.length) ordered.push(...(await this.sortScenesByLastUsed(remaining, hass, aid)));
+        return ordered;
       }
-      
-      // Default behavior: sort by last used
-      const entitiesWithLastUsed = await Promise.all(
-        scenesEntities.map(async (entity) => {
-          const state = hass.states[entity.entity_id];
-          let lastUsed: Date | null = null;
-          
-          // Try to get last used from state attributes
-          if (state?.attributes?.last_triggered) {
-            lastUsed = new Date(state.attributes.last_triggered);
-          } else if (state?.last_changed) {
-            lastUsed = new Date(state.last_changed);
-          } else if (state?.last_updated) {
-            lastUsed = new Date(state.last_updated);
-          }
-          
-          // If still null or epoch time, treat as never triggered
-          if (!lastUsed || lastUsed.getTime() <= 0) {
-            lastUsed = null;
-          }
-          
-          return { entity, lastUsed };
-        })
-      );
-      
-      // Sort by last used (most recent first) then by name for ties
-      entitiesWithLastUsed.sort((a, b) => {
-        // Handle null values - null should be sorted last
-        if (a.lastUsed === null && b.lastUsed === null) {
-          // Both never triggered, sort by name
-          const aState = hass.states[a.entity.entity_id];
-          const bState = hass.states[b.entity.entity_id];
-          const aName = aState?.attributes?.friendly_name || a.entity.entity_id;
-          const bName = bState?.attributes?.friendly_name || b.entity.entity_id;
-          return aName.localeCompare(bName);
-        }
-        if (a.lastUsed === null) return 1;
-        if (b.lastUsed === null) return -1;
-        
-        // Both have valid timestamps, compare them (most recent first)
-        const timeDiff = b.lastUsed.getTime() - a.lastUsed.getTime();
-        if (timeDiff !== 0) return timeDiff;
-        
-        // If same time, sort by name
-        const aState = hass.states[a.entity.entity_id];
-        const bState = hass.states[b.entity.entity_id];
-        const aName = aState?.attributes?.friendly_name || a.entity.entity_id;
-        const bName = bState?.attributes?.friendly_name || b.entity.entity_id;
-        
-        return aName.localeCompare(bName);
+      const withLast = await Promise.all(ents.map(async (e) => {
+        const s = hass.states[e.entity_id];
+        let last: Date | null = s?.attributes?.last_triggered ? new Date(s.attributes.last_triggered) : (s?.last_changed ? new Date(s.last_changed) : (s?.last_updated ? new Date(s.last_updated) : null));
+        return { e, last: (last && last.getTime() > 0) ? last : null };
+      }));
+      withLast.sort((a, b) => {
+        if (!a.last && !b.last) return (hass.states[a.e.entity_id]?.attributes?.friendly_name || a.e.entity_id).localeCompare(hass.states[b.e.entity_id]?.attributes?.friendly_name || b.e.entity_id);
+        if (!a.last) return 1; if (!b.last) return -1;
+        const diff = b.last.getTime() - a.last.getTime();
+        return diff !== 0 ? diff : (hass.states[a.e.entity_id]?.attributes?.friendly_name || a.e.entity_id).localeCompare(hass.states[b.e.entity_id]?.attributes?.friendly_name || b.e.entity_id);
       });
-      
-      return entitiesWithLastUsed.map(item => item.entity);
-    } catch (error) {
-      // Fallback to alphabetical sorting
-      const sortedEntities = [...scenesEntities].sort((a, b) => {
-        const aState = hass.states[a.entity_id];
-        const bState = hass.states[b.entity_id];
-        
-        const aName = aState?.attributes?.friendly_name || a.entity_id;
-        const bName = bState?.attributes?.friendly_name || b.entity_id;
-        
-        return aName.localeCompare(bName);
-      });
-      
-      return sortedEntities;
-    }
+      return withLast.map(i => i.e);
+    } catch { return [...ents].sort((a, b) => (hass.states[a.entity_id]?.attributes?.friendly_name || a.entity_id).localeCompare(hass.states[b.entity_id]?.attributes?.friendly_name || b.entity_id)); }
   }
 
-  private createEntityCard(entityId: string, hass: any, entity?: Entity): CardConfig | null {
-    const state = hass.states[entityId];
-    if (!state) {
-      return null;
-    }
-    
-    const friendlyName = state?.attributes?.friendly_name || entityId.split('.')[1].replace(/_/g, ' ');
-    const domain = entityId.split('.')[0];
-    
-    // Determine card type and properties
-    let cardType = 'custom:apple-home-card';
-    let isTallCard = false;
-    
-    // Check if domain should be tall by default
-    if (DashboardConfig.isDefaultTallDomain(domain)) {
-      isTallCard = true;
-    }
-    
-    // Check if there's a custom tall card setting from customizations
-    if (entity && typeof (entity as any).is_tall !== 'undefined') {
-      isTallCard = (entity as any).is_tall;
-    }
-    
-    const card: CardConfig = {
-      type: cardType,
-      entity: entityId,
-      name: friendlyName,
-      domain: domain,
-      is_tall: isTallCard
-    };
-    
-    // Add default icon for scenes/scripts without icons
-    if (DashboardConfig.isScenesDomain(domain) && !state.attributes?.icon) {
-      (card as any).default_icon = 'mdi:home';
-    }
-    
-    return card;
+  private createEntityCard(eid: string, hass: any, entity?: Entity): CardConfig | null {
+    const s = hass.states[eid]; if (!s) return null; const dom = eid.split('.')[0];
+    let tall = DashboardConfig.isDefaultTallDomain(dom); if (entity && typeof (entity as any).is_tall !== 'undefined') tall = (entity as any).is_tall;
+    const c: CardConfig = { type: 'custom:apple-home-card', entity: eid, name: s.attributes?.friendly_name || eid.split('.')[1].replace(/_/g, ' '), domain: dom, is_tall: tall };
+    if (DashboardConfig.isScenesDomain(dom) && !s.attributes?.icon) (c as any).default_icon = 'mdi:home';
+    return c;
   }
 
-  private async createAndAppendCard(
-    cardConfig: any,
-    container: HTMLElement,
-    hass: any,
-    onTallToggle?: (entityId: string, areaId: string) => void | Promise<void | boolean>,
-    context: string = 'home'
-  ): Promise<void> {
+  private async createAndAppendCard(cfg: any, container: HTMLElement, hass: any, onTallToggle?: (eid: string, aid: string) => void | Promise<void | boolean>, ctx: string = 'home'): Promise<void> {
     try {
-      let cardElement: HTMLElement;
-      
-      if (cardConfig.type === 'custom:apple-home-card') {
-        cardElement = document.createElement('apple-home-card') as HTMLElement;
-        
-        // Determine if card should be tall based on customizations
-        const shouldBeTall = this.cardManager.shouldCardBeTall(cardConfig.entity, container.dataset.areaId || 'unknown', context);
-        const configWithTall = { ...cardConfig, is_tall: shouldBeTall };
-        
-        // Add default icon if specified
-        if ((cardConfig as any).default_icon) {
-          configWithTall.default_icon = (cardConfig as any).default_icon;
-        }
-        
-        (cardElement as any).setConfig(configWithTall);
-        (cardElement as any).hass = hass;
+      let el: HTMLElement;
+      if (cfg.type === 'custom:apple-home-card') {
+        el = document.createElement('apple-home-card') as HTMLElement;
+        const tall = this.cardManager.shouldCardBeTall(cfg.entity, container.dataset.areaId || 'unknown', ctx);
+        const finalCfg = { ...cfg, is_tall: tall }; if (cfg.default_icon) finalCfg.default_icon = cfg.default_icon;
+        (el as any).setConfig(finalCfg); (el as any).hass = hass;
       } else {
-        // Handle other card types
-        const customCardType = cardConfig.type.replace('custom:', '');
-        if (customElements.get(customCardType)) {
-          cardElement = document.createElement(customCardType);
-          if (cardElement && typeof (cardElement as any).setConfig === 'function') {
-            (cardElement as any).setConfig(cardConfig);
-            (cardElement as any).hass = hass;
-          }
-        } else {
-          cardElement = document.createElement('div');
-          cardElement.innerHTML = `<div style="color: red;">Unknown card type: ${cardConfig.type}</div>`;
-        }
+        const type = cfg.type.replace('custom:', '');
+        if (customElements.get(type)) { el = document.createElement(type); if (el && typeof (el as any).setConfig === 'function') { (el as any).setConfig(cfg); (el as any).hass = hass; } }
+        else { el = document.createElement('div'); el.className = 'error-placeholder'; el.innerHTML = `<div style="color:red;padding:10px;background:rgba(255,0,0,0.1);border-radius:10px;">Unknown: ${cfg.type}</div>`; }
       }
-      
-      const wrapper = document.createElement('div');
-      wrapper.className = 'entity-card-wrapper';
-      wrapper.dataset.entityId = cardConfig.entity;
-      
-      // Check if this is a carousel container to adjust wrapper sizing
-      const isCarousel = container.classList.contains('carousel-grid');
-      const sectionType = container.dataset.sectionType;
-      
-      // Determine if card should be tall based on customizations
-      let shouldBeTall = this.cardManager.shouldCardBeTall(cardConfig.entity, container.dataset.areaId || 'unknown', context);
-      
-      // For scenes in carousel, they should follow their normal sizing
-      if (isCarousel && sectionType === 'scenes') {
-        // Keep the customization-based tall setting
-      }
-      
-      if (shouldBeTall) {
-        wrapper.classList.add('tall');
-      }
-      
-      // Always add edit mode controls
-      const controlsDiv = document.createElement('div');
-      controlsDiv.className = 'entity-controls';
-      
-      let controlsHTML = '';
-      
-      // Get entity domain to check if it's a camera or scene
-      const entityDomain = cardConfig.entity ? cardConfig.entity.split('.')[0] : '';
-      const isFixedSizeEntity = ['camera', 'scene', 'script'].includes(entityDomain);
-      
-      // Only show tall toggle for regular entities (not carousels, cameras, or scenes)
-      if (!isCarousel && !isFixedSizeEntity) {
-        controlsHTML = `
-          <button class="entity-control-btn tall-toggle ${shouldBeTall ? 'active' : ''}" 
-                  data-action="toggle-tall" 
-                  title="Toggle card design">
-            <ha-icon icon="mdi:${shouldBeTall ? 'arrow-collapse' : 'arrow-expand'}"></ha-icon>
-          </button>
-        `;
-      }
-      
-      controlsDiv.innerHTML = controlsHTML;
-      
-      // Add event listeners for controls
-      const tallToggle = controlsDiv.querySelector('.tall-toggle') as HTMLButtonElement;
-      if (tallToggle && onTallToggle) {
-        tallToggle.addEventListener('click', (e) => {
-          e.stopPropagation();
-          onTallToggle(cardConfig.entity, container.dataset.areaId || 'unknown');
-        });
-      }
-      
-      // Add hide/remove button (top-left, Apple-style minus circle)
-      const hideBtn = document.createElement('button');
-      hideBtn.className = 'entity-control-btn entity-hide-btn';
-      hideBtn.dataset.action = 'hide-entity';
-      hideBtn.title = 'Hide from Home';
-      hideBtn.innerHTML = `<ha-icon icon="mdi:minus"></ha-icon>`;
-      hideBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        // Dispatch custom event for AppleHomeView to handle
-        wrapper.dispatchEvent(new CustomEvent('apple-home-hide-entity', {
-          bubbles: true,
-          composed: true,
-          detail: { 
-            entityId: cardConfig.entity,
-            areaId: container.dataset.areaId || 'unknown'
-          }
-        }));
-      });
-      
-      wrapper.appendChild(hideBtn);
-      wrapper.appendChild(controlsDiv);
-      wrapper.appendChild(cardElement);
-      container.appendChild(wrapper);
-      
-    } catch (error) {
-      console.error('Error creating card:', error);
-    }
+      const wrap = document.createElement('div'); wrap.className = 'entity-card-wrapper'; wrap.dataset.entityId = cfg.entity;
+      const isTall = this.cardManager.shouldCardBeTall(cfg.entity, container.dataset.areaId || 'unknown', ctx); if (isTall) wrap.classList.add('tall');
+      const ctrls = document.createElement('div'); ctrls.className = 'entity-controls';
+      const hide = document.createElement('button'); hide.className = 'entity-control-btn entity-hide-btn'; hide.dataset.action = 'hide-entity'; hide.innerHTML = `<ha-icon icon="mdi:minus"></ha-icon>`;
+      hide.addEventListener('click', (e) => { e.stopPropagation(); wrap.dispatchEvent(new CustomEvent('apple-home-hide-entity', { bubbles: true, composed: true, detail: { entityId: cfg.entity, areaId: container.dataset.areaId || 'unknown' } })); });
+      wrap.appendChild(hide); wrap.appendChild(ctrls); wrap.appendChild(el!); container.appendChild(wrap);
+    } catch (err) { console.error('Error creating card in ScenesSection:', err); }
   }
 
-  private navigateToPath(path: string) {
-    const currentPath = window.location.pathname;
-    let basePath = '';
-    
-    // Handle different dashboard URL patterns
-    if (currentPath.startsWith('/lovelace/')) {
-      basePath = '/lovelace/';
-    } else if (currentPath === '/lovelace') {
-      basePath = '/lovelace/';
-    } else {
-      // Custom dashboard: extract the dashboard name
-      const pathParts = currentPath.split('/').filter(part => part.length > 0);
-      if (pathParts.length > 0) {
-        basePath = `/${pathParts[0]}/`;
-      } else {
-        basePath = '/lovelace/';
-      }
-    }
-    
-    // Clean path and construct full URL
-    const cleanPath = path.startsWith('/') ? path.slice(1) : path;
-    const newUrl = `${basePath}${cleanPath}`;
-    
-    // Navigate using Home Assistant's system
-    window.history.pushState(null, '', newUrl);
-    const event = new Event('location-changed', { bubbles: true, composed: true });
-    window.dispatchEvent(event);
+  private navigateToPath(p: string) {
+    const cur = window.location.pathname; let base = '';
+    if (cur.startsWith('/lovelace/') || cur === '/lovelace') base = '/lovelace/';
+    else { const parts = cur.split('/').filter(x => x.length > 0); base = parts.length > 0 ? `/${parts[0]}/` : '/lovelace/'; }
+    const url = `${base}${p.startsWith('/') ? p.slice(1) : p}`;
+    if (url !== cur) { window.history.pushState(null, '', url); window.dispatchEvent(new Event('location-changed', { bubbles: true, composed: true })); }
   }
 
-  /**
-   * Setup click-and-drag scrolling for desktop users
-   */
-  private setupDragScroll(container: HTMLElement): void {
-    let isDown = false;
-    let startX: number;
-    let scrollLeft: number;
-    let hasDragged = false;
-    const dragThreshold = 5; // Minimum pixels moved to consider it a drag
-
-    // Function to check if container has overflow and update cursor
-    const updateDragState = () => {
-      const hasOverflow = container.scrollWidth > container.clientWidth;
-      if (hasOverflow) {
-        container.style.cursor = 'grab';
-      } else {
-        container.style.cursor = '';
-      }
-      return hasOverflow;
-    };
-
-    // Initial check
-    setTimeout(updateDragState, 100);
-
-    container.addEventListener('mousedown', (e) => {
-      // Skip if reordering is in progress or not left button or no overflow
-      const { DragAndDropManager } = require('../utils/DragAndDropManager');
-      if (DragAndDropManager.isReordering || e.button !== 0 || !updateDragState()) return;
-      
-      isDown = true;
-      hasDragged = false;
-      container.style.cursor = 'grabbing';
-      startX = e.pageX - container.offsetLeft;
-      scrollLeft = container.scrollLeft;
-    });
-
-    container.addEventListener('mouseleave', () => {
-      isDown = false;
-      updateDragState();
-    });
-
-    container.addEventListener('mouseup', () => {
-      isDown = false;
-      updateDragState();
-    });
-
-    container.addEventListener('mousemove', (e) => {
-      // Stop if reordering started or not dragging
-      const { DragAndDropManager } = require('../utils/DragAndDropManager');
-      if (!isDown || DragAndDropManager.isReordering) {
-        if (DragAndDropManager.isReordering) isDown = false; // Reset state
-        return;
-      }
-      e.preventDefault();
-      const x = e.pageX - container.offsetLeft;
-      const walk = x - startX;
-      
-      // Mark as dragged if moved beyond threshold
-      if (Math.abs(walk) > dragThreshold) {
-        hasDragged = true;
-      }
-      
-      container.scrollLeft = scrollLeft - walk;
-    });
-
-    // Prevent click events on cards when dragging
-    container.addEventListener('click', (e) => {
-      if (hasDragged) {
-        e.preventDefault();
-        e.stopPropagation();
-        hasDragged = false;
-      }
-    }, true);
+  private setupDragScroll(c: HTMLElement): void {
+    let down = false, sX: number, sL: number, dragged = false;
+    const upd = () => { const over = c.scrollWidth > c.clientWidth; c.style.cursor = over ? 'grab' : ''; return over; };
+    setTimeout(upd, 100);
+    c.addEventListener('mousedown', (e) => { if (DragAndDropManager.isReordering || e.button !== 0 || !upd()) return; down = true; dragged = false; c.style.cursor = 'grabbing'; sX = e.pageX - c.offsetLeft; sL = c.scrollLeft; });
+    c.addEventListener('mouseleave', () => { down = false; upd(); }); c.addEventListener('mouseup', () => { down = false; upd(); });
+    c.addEventListener('mousemove', (e) => { if (!down || DragAndDropManager.isReordering) { if (DragAndDropManager.isReordering) down = false; return; } e.preventDefault(); const walk = (e.pageX - c.offsetLeft) - sX; if (Math.abs(walk) > 5) dragged = true; c.scrollLeft = sL - walk; });
+    c.addEventListener('click', (e) => { if (dragged) { e.preventDefault(); e.stopPropagation(); dragged = false; } }, true);
   }
 }
