@@ -30,6 +30,7 @@ export class SectionReorderManager {
     const favs = await this.customizationManager.getFavoriteAccessories();
     if (favs.length > 0) { const b = (hasW ? 1 : 0) + (hasE ? 1 : 0) + (cams.length > 0 ? 1 : 0) + (scns.length > 0 ? 1 : 0); res.push({ id: 'favorites_section', name: localize('section_titles.favorites'), type: 'favorites', visible: !hid.includes('favorites_section'), order: ord.indexOf('favorites_section') !== -1 ? ord.indexOf('favorites_section') : b }); }
     areas.forEach((a, i) => { const id = a.area_id || a.id, b = (hasW ? 1 : 0) + (hasE ? 1 : 0) + (cams.length > 0 ? 1 : 0) + (scns.length > 0 ? 1 : 0) + (favs.length > 0 ? 1 : 0) + i; res.push({ id, name: a.name || id, type: 'area', visible: !hid.includes(id), order: ord.indexOf(id) !== -1 ? ord.indexOf(id) : b }); });
+    let hasDef = false; try { const e = hass.entities ? (Object.values(hass.entities) as any[]) : [], d = hass.devices ? (Object.values(hass.devices) as any[]) : []; hasDef = e.some((x: any) => !x.area_id && (!x.device_id || !d.find((y: any) => y.id === x.device_id)?.area_id)); } catch { hasDef = true; }
     if (hasDef) { const b = (hasW ? 1 : 0) + (hasE ? 1 : 0) + (cams.length > 0 ? 1 : 0) + (scns.length > 0 ? 1 : 0) + (favs.length > 0 ? 1 : 0) + areas.length; res.push({ id: 'no_area', name: localize('pages.default_room'), type: 'area', visible: !hid.includes('no_area'), order: ord.indexOf('no_area') !== -1 ? ord.indexOf('no_area') : b }); }
     return res.sort((a, b) => a.order - b.order);
   }

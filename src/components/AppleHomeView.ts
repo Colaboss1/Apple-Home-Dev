@@ -41,6 +41,10 @@ export class AppleHomeView extends HTMLElement {
   private _isTransitioning = false;
   private _activePage: string = 'home';
 
+  private _boundGlobalRefresh?: (e: any) => void;
+  private _boundLocationChange?: () => void;
+  private _boundSidebarToggle?: (e: any) => void;
+
   constructor() {
     super();
     this.customizationManager = CustomizationManager.getInstance();
@@ -116,16 +120,29 @@ export class AppleHomeView extends HTMLElement {
     this.setCurrentActiveInstance();
   }
 
+  disconnectedCallback() {
+    if (this._boundGlobalRefresh) document.removeEventListener('apple-home-dashboard-refresh', this._boundGlobalRefresh);
+    if (this._boundLocationChange) {
+      window.removeEventListener('location-changed', this._boundLocationChange);
+      window.removeEventListener('popstate', this._boundLocationChange);
+    }
+    if (this._boundSidebarToggle) window.removeEventListener('apple-sidebar-toggled', this._boundSidebarToggle);
+  }
+
   private setupListeners() {
-    document.addEventListener('apple-home-dashboard-refresh', (e: any) => { if (e.detail?.customizations) this.handleGlobalRefresh(e.detail.customizations); });
-    this.addEventListener('apple-home-hide-entity', (e: any) => this.handleHideEntity(e.detail.entityId, e.detail.areaId));
-    window.addEventListener('location-changed', () => this.handleLocationChange());
-    window.addEventListener('popstate', () => this.handleLocationChange());
-    window.addEventListener('apple-sidebar-toggled', (e: any) => {
+    this._boundGlobalRefresh = (e: any) => { if (e.detail?.customizations) this.handleGlobalRefresh(e.detail.customizations); };
+    this._boundLocationChange = () => this.handleLocationChange();
+    this._boundSidebarToggle = (e: any) => {
       if (e.detail?.toggle) this.isSidebarCollapsed = !this.isSidebarCollapsed;
       else if (e.detail?.open !== undefined) this.isSidebarCollapsed = !e.detail.open;
       this.updateSidebarState();
-    });
+    };
+
+    document.addEventListener('apple-home-dashboard-refresh', this._boundGlobalRefresh);
+    this.addEventListener('apple-home-hide-entity', (e: any) => this.handleHideEntity(e.detail.entityId, e.detail.areaId));
+    window.addEventListener('location-changed', this._boundLocationChange);
+    window.addEventListener('popstate', this._boundLocationChange);
+    window.addEventListener('apple-sidebar-toggled', this._boundSidebarToggle);
   }
 
   private updateSidebarState() {

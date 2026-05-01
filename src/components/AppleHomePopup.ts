@@ -56,7 +56,7 @@ export class AppleHomePopup extends HTMLElement {
     const throttledCallService = () => {
       if (this.sliderValue === this.lastThrottledValue) return;
       this.lastThrottledValue = this.sliderValue;
-      if (this.domain === 'light') { if (this.sliderValue === 0) this._hass.callService('light', 'turn_off', { entity_id: this.entityId }); else this._hass.callService('light', 'turn_on', { entity_id: this.entityId, brightness_pct: this.sliderValue }); }
+      if (this.domain === 'light') { if (this.sliderValue === 0) this._hass.callService('light', 'turn_off', { entity_id: this.entityId }); else this._hass.callService('light', 'turn_on', { entity_id: this.entityId, brightness: Math.round((this.sliderValue / 100) * 255) }); }
       else if (this.domain === 'cover') this._hass.callService('cover', 'set_cover_position', { entity_id: this.entityId, position: this.sliderValue });
       else if (this.domain === 'climate' || this.domain === 'water_heater') this._hass.callService(this.domain, 'set_temperature', { entity_id: this.entityId, temperature: this.sliderValue });
       else if (this.domain === 'media_player') this._hass.callService('media_player', 'volume_set', { entity_id: this.entityId, volume_level: this.sliderValue / 100 });

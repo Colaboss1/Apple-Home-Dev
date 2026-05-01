@@ -234,7 +234,6 @@ export class AppleHomeCard extends HTMLElement {
         .temperature-display { background: transparent !important; box-shadow: none !important; }
         .temperature-text { font-size: 15px; font-weight: 700; color: var(--card-icon-color); }
         :host(.tall-card) .temperature-text { font-size: 34px; letter-spacing: -1px; }
-        .apple-home-card.edit-mode { pointer-events: none; }
       `);
       AppleHomeCard._styles = sheet;
     }
