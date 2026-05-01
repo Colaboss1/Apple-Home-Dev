@@ -61,7 +61,7 @@ export class AppleHeader {
         .header-btn ha-icon { --mdc-icon-size: 22px; }
         .done-btn { background: #fff; color: #000; border-radius: 18px; padding: 0 16px; width: auto; font-size: 15px; font-weight: 600; height: 32px; }
         .done-btn:hover { background: rgba(255, 255, 255, 0.9); }
-        .menu-dropdown { position: absolute; top: 50px; right: 10px; background: rgba(35, 35, 38, 0.95); backdrop-filter: blur(30px); border-radius: 14px; padding: 6px; min-width: 200px; box-shadow: 0 15px 40px rgba(0,0,0,0.4); display: none; flex-direction: column; z-index: 1001; border: 0.5px solid rgba(255,255,255,0.1); }
+        .menu-dropdown { position: absolute; top: 50px; right: 10px; background: rgba(35, 35, 38, 0.7); backdrop-filter: blur(30px); border-radius: 14px; padding: 6px; min-width: 200px; box-shadow: 0 15px 40px rgba(0,0,0,0.4); display: none; flex-direction: column; z-index: 1001; border: 0.5px solid rgba(255,255,255,0.1); will-change: transform, opacity; }
         .menu-dropdown.show { display: flex; animation: menuFadeIn 0.2s cubic-bezier(0.16, 1, 0.3, 1); }
         @keyframes menuFadeIn { from { opacity: 0; transform: scale(0.95) translateY(-10px); } to { opacity: 1; transform: scale(1) translateY(0); } }
         .menu-item { padding: 10px 14px; color: #fff; cursor: pointer; display: flex; align-items: center; justify-content: space-between; border-radius: 10px; font-size: 15px; font-weight: 500; transition: background 0.2s; }

@@ -3,6 +3,7 @@ import { localize } from '../utils/LocalizationService';
 export class AppleTabBar {
   private container: HTMLElement;
   private activePage: string = 'home';
+  private lastRenderedPage: string = '';
   private onNavigate?: (path: string) => void;
 
   constructor(container: HTMLElement) {
@@ -11,7 +12,10 @@ export class AppleTabBar {
 
   set hass(hass: any) {
     this.updateActivePage();
-    this.render();
+    if (this.activePage !== this.lastRenderedPage) {
+      this.render();
+      this.lastRenderedPage = this.activePage;
+    }
   }
 
   setOnNavigate(cb: (path: string) => void) {
@@ -32,7 +36,7 @@ export class AppleTabBar {
           position: fixed;
           bottom: 24px;
           left: 50%;
-          transform: translateX(-50%);
+          transform: translateX(-50%) translateZ(0);
           width: calc(100% - 44px);
           max-width: 400px;
           height: 64px;
@@ -47,6 +51,7 @@ export class AppleTabBar {
           z-index: 2000;
           box-shadow: 0 10px 30px rgba(0,0,0,0.3);
           border: 0.5px solid rgba(255,255,255,0.1);
+          will-change: transform;
         }
         .tab-item {
           display: flex;
@@ -59,6 +64,7 @@ export class AppleTabBar {
           transition: all 0.2s ease;
           flex: 1;
           height: 100%;
+          -webkit-tap-highlight-color: transparent;
         }
         .tab-item.active {
           color: #ffcc00;
@@ -78,17 +84,17 @@ export class AppleTabBar {
         }
       </style>
       <div class="apple-tab-bar">
-        <div class="tab-item ${this.activePage === 'home' ? 'active' : ''}" data-path="home">
+        <div class="tab-item \${this.activePage === 'home' ? 'active' : ''}" data-path="home">
           <ha-icon icon="mdi:home-variant"></ha-icon>
-          <span class="tab-text">${localize('pages.my_home')}</span>
+          <span class="tab-text">\${localize('pages.my_home')}</span>
         </div>
-        <div class="tab-item ${this.activePage === 'automation' ? 'active' : ''}" data-path="scenes">
+        <div class="tab-item \${this.activePage === 'automation' ? 'active' : ''}" data-path="scenes">
           <ha-icon icon="mdi:clock-star-four-points"></ha-icon>
-          <span class="tab-text">${localize('ui_actions.automation')}</span>
+          <span class="tab-text">\${localize('ui_actions.automation')}</span>
         </div>
-        <div class="tab-item ${this.activePage === 'discover' ? 'active' : ''}" data-path="discover">
+        <div class="tab-item \${this.activePage === 'discover' ? 'active' : ''}" data-path="discover">
           <ha-icon icon="mdi:star"></ha-icon>
-          <span class="tab-text">${localize('pages.discover')}</span>
+          <span class="tab-text">\${localize('pages.discover')}</span>
         </div>
       </div>
     `;
@@ -104,10 +110,11 @@ export class AppleTabBar {
   private navigateTo(path: string) {
     const cur = window.location.pathname;
     const base = cur.split('/').filter(Boolean)[0] || 'lovelace';
-    const url = `/${base}/${path === 'home' ? '' : path}`;
+    const url = \`/\${base}/\${path === 'home' ? '' : path}\`;
     if (url === cur || url === cur + '/') return;
     window.history.pushState(null, '', url);
     window.dispatchEvent(new Event('location-changed'));
     this.onNavigate?.(path);
   }
 }
+

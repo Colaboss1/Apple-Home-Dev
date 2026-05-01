@@ -17,8 +17,28 @@ export class StatusSection {
   private _areaId?: string;
   private _container?: HTMLElement;
 
+  private updateTimeout: any;
+  private lastUpdateTimestamp: number = 0;
+
   constructor(cm: CustomizationManager, cardManager?: CardManager) { this.customizationManager = cm; this.cardManager = cardManager || new CardManager(cm); }
-  set hass(h: any) { this._hass = h; if (this._container && this._entities) this.updateStatus(this._entities, h, this._areaId); }
+  set hass(h: any) { 
+    this._hass = h; 
+    if (this._container && this._entities) {
+      const now = Date.now();
+      if (now - this.lastUpdateTimestamp < 200) {
+        if (!this.updateTimeout) {
+          this.updateTimeout = setTimeout(() => {
+            this.updateStatus(this._entities!, this._hass, this._areaId);
+            this.updateTimeout = null;
+            this.lastUpdateTimestamp = Date.now();
+          }, 200 - (now - this.lastUpdateTimestamp));
+        }
+        return;
+      }
+      this.lastUpdateTimestamp = now;
+      this.updateStatus(this._entities, h, this._areaId);
+    } 
+  }
 
   async render(container: HTMLElement, entities: Entity[], hass: any, areaId?: string): Promise<void> {
     this._hass = hass; this._entities = entities; this._areaId = areaId; this._container = container; this.statusItems = this.generateStatusData(entities, hass); const vis = this.statusItems.filter(i => i.isVisible); if (vis.length === 0) return;
@@ -27,7 +47,7 @@ export class StatusSection {
 
   private async updateStatus(entities: Entity[], hass: any, areaId?: string): Promise<void> {
     if (!this._container) return; const ex = this._container.querySelector('.apple-status-section'); if (!ex) return; const next = this.generateStatusData(entities, hass), vis = next.filter(i => i.isVisible); if (vis.length === 0) { ex.remove(); return; }
-    vis.forEach(i => { const chip = ex.querySelector(`[data-domain="${i.domain}"]`); if (chip) { const v = chip.querySelector('.status-chip-value'); if (v) v.textContent = i.value; chip.setAttribute('data-entity-ids', i.entityIds.join(',')); } }); this.statusItems = next;
+    vis.forEach(i => { const chip = ex.querySelector(`[data-domain="${i.domain}"]`); if (chip) { const v = chip.querySelector('.status-chip-value'); if (v && v.textContent !== i.value) v.textContent = i.value; const oldIds = chip.getAttribute('data-entity-ids'); const newIds = i.entityIds.join(','); if (oldIds !== newIds) chip.setAttribute('data-entity-ids', newIds); } }); this.statusItems = next;
   }
 
   private generateStatusData(entities: Entity[], hass: any): StatusData[] {

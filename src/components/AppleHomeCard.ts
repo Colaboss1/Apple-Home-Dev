@@ -216,12 +216,12 @@ export class AppleHomeCard extends HTMLElement {
       const sheet = new CSSStyleSheet();
       sheet.replaceSync(`
         :host { display: block; width: 100%; height: 100%; }
-        .apple-home-card { background: var(--card-bg-color); border-radius: var(--apple-card-radius, 22px); padding: 12px; display: flex; flex-direction: column; height: 100%; box-sizing: border-box; cursor: pointer; transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1); position: relative; overflow: hidden; user-select: none; backdrop-filter: var(--card-backdrop-filter); -webkit-backdrop-filter: var(--card-backdrop-filter); box-shadow: 0 4px 15px rgba(0,0,0,0.05); }
+        .apple-home-card { background: var(--card-bg-color); border-radius: var(--apple-card-radius, 22px); padding: 12px; display: flex; flex-direction: column; height: 100%; box-sizing: border-box; cursor: pointer; transition: transform 0.4s cubic-bezier(0.16, 1, 0.3, 1), background-color 0.4s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.4s cubic-bezier(0.16, 1, 0.3, 1); position: relative; overflow: hidden; user-select: none; backdrop-filter: var(--card-backdrop-filter); -webkit-backdrop-filter: var(--card-backdrop-filter); box-shadow: 0 4px 15px rgba(0,0,0,0.05); transform: translateZ(0); will-change: transform, background-color, opacity; }
         .apple-home-card:active { transform: scale(0.95); opacity: 0.9; }
         .apple-home-card.edit-mode:active { transform: none; opacity: 1; }
         .card-info { display: flex; flex-direction: row; align-items: center; gap: 12px; height: 100%; z-index: 1; }
         :host(.tall-card) .card-info { flex-direction: column; align-items: flex-start; justify-content: space-between; }
-        .info-icon { width: 36px; height: 36px; border-radius: 50%; background: var(--card-icon-bg); color: var(--card-icon-color); display: flex; align-items: center; justify-content: center; flex-shrink: 0; transition: all 0.3s ease; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+        .info-icon { width: 36px; height: 36px; border-radius: 50%; background: var(--card-icon-bg); color: var(--card-icon-color); display: flex; align-items: center; justify-content: center; flex-shrink: 0; transition: background-color 0.3s ease, color 0.3s ease; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
         .info-icon ha-icon { --mdc-icon-size: 20px; }
         .text-content { flex: 1; min-width: 0; display: flex; flex-direction: column; }
         .entity-name { font-size: 15px; font-weight: 600; color: var(--card-text-color); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; letter-spacing: -0.3px; }

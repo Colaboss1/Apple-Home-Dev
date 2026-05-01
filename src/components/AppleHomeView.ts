@@ -74,9 +74,9 @@ export class AppleHomeView extends HTMLElement {
       .carousel-grid .entity-card-wrapper { flex: 0 0 auto; width: 160px; height: 74px; }
       .carousel-grid.cameras .entity-card-wrapper { width: 280px; height: 185px; }
       .area-entities { display: grid; grid-template-columns: repeat(12, 1fr); grid-auto-rows: 74px; gap: var(--card-gap); margin-bottom: 24px; }
-      .entity-card-wrapper { grid-column: span 3; position: relative; }
+      .entity-card-wrapper { grid-column: span 3; position: relative; will-change: transform; transform: translateZ(0); }
       .entity-card-wrapper.tall { grid-row: span 2; }
-      .entity-card-wrapper.edit-mode { animation: jiggle 0.3s ease-in-out infinite alternate; }
+      .entity-card-wrapper.edit-mode { animation: jiggle 0.3s ease-in-out infinite alternate; will-change: transform; }
       @keyframes jiggle { 0% { transform: rotate(-0.8deg); } 100% { transform: rotate(0.8deg); } }
       .entity-controls { position: absolute; top: -8px; right: -8px; display: none; gap: 4px; z-index: 10; }
       .edit-mode .entity-controls { display: flex; }
@@ -86,8 +86,8 @@ export class AppleHomeView extends HTMLElement {
       .edit-mode .entity-hide-btn { display: flex; }
       :host(.is-ipad-mode) .wrapper-content { margin-left: 320px; width: calc(100% - 320px); }
       :host(.is-ipad-mode.sidebar-collapsed) .wrapper-content { margin-left: 0; width: 100%; }
-      .sidebar-container { position: fixed; top: 0; left: 0; width: 320px; height: 100vh; z-index: 1000; transition: transform 0.4s cubic-bezier(0.16, 1, 0.3, 1); background: rgba(20,20,22,0.8); backdrop-filter: blur(40px); }
-      :host(.sidebar-collapsed) .sidebar-container { transform: translateX(-100%); }
+      .sidebar-container { position: fixed; top: 0; left: 0; width: 320px; height: 100vh; z-index: 1000; transition: transform 0.4s cubic-bezier(0.16, 1, 0.3, 1); background: transparent; transform: translateZ(0); will-change: transform; pointer-events: auto; }
+      :host(.sidebar-collapsed) .sidebar-container { transform: translateX(-100%); pointer-events: none; }
       @container (max-width: 1000px) { .entity-card-wrapper { grid-column: span 4; } }
       @container (max-width: 700px) { .entity-card-wrapper { grid-column: span 6; } }
       @container (max-width: 450px) { .entity-card-wrapper { grid-column: span 12; } }
