@@ -110,7 +110,7 @@ export class AppleTabBar {
   private navigateTo(path: string) {
     const cur = window.location.pathname;
     const base = cur.split('/').filter(Boolean)[0] || 'lovelace';
-    const url = \`/\${base}/\${path === 'home' ? '' : path}\`;
+    const url = `/${base}/${path === 'home' ? '' : path}`;
     if (url === cur || url === cur + '/') return;
     window.history.pushState(null, '', url);
     window.dispatchEvent(new Event('location-changed'));

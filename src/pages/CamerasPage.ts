@@ -216,7 +216,7 @@ export class CamerasPage {
         });
       }, 100);
     } else {
-      this.dragAndDropManager.disableDragAndDrop(container);
+      this.dragAndDropManager.destroy();
       const entityWrappers = container.querySelectorAll('.entity-card-wrapper');
       entityWrappers.forEach((wrapper) => {
         const element = wrapper as HTMLElement;

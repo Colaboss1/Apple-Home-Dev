@@ -74,7 +74,7 @@ export class AppleChips {
   applySavedChipsOrder(chips: ChipData[]): ChipData[] {
     if (!this.customizationManager) return chips; const saved = this.customizationManager.getSavedChipsOrder(); if (saved.length === 0) return chips;
     const map = new Map(chips.map(c => [c.group, c])), ordered: ChipData[] = [], used = new Set();
-    saved.forEach((g: string) => { if (map.has(g)) { ordered.push(map.get(g)!); used.add(g); } });
+    saved.forEach((g: string) => { const dg = g as DeviceGroup; if (map.has(dg)) { ordered.push(map.get(dg)!); used.add(g); } });
     chips.forEach(c => { if (!used.has(c.group)) ordered.push(c); }); return ordered;
   }
 
@@ -138,7 +138,7 @@ export class AppleChips {
       case DeviceGroup.ENERGY: const pwr = EnergySection.getTotalPower(this._hass); txt = pwr !== null ? (pwr >= 1000 ? `${(pwr / 1000).toFixed(1)} kW` : `${Math.round(pwr)} W`) : localize('energy.active'); break;
       default: txt = localize('status.off'); break;
     }
-    if (this.statusTextCache.size > 20) this.statusTextCache.delete(this.statusTextCache.keys().next().value);
+    if (this.statusTextCache.size > 20) { const nk = this.statusTextCache.keys().next().value; if (nk) this.statusTextCache.delete(nk); }
     this.statusTextCache.set(key, txt); return txt;
   }
 }

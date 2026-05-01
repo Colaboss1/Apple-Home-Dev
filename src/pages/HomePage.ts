@@ -146,7 +146,7 @@ export class HomePage {
       for (const sid of available.keys()) { if (!ids.includes(sid)) { if (sid === 'weather_section' || sid === 'energy_section') ids.unshift(sid); else ids.push(sid); } }
     } else {
       ids = Array.from(available.keys()).sort((a, b) => {
-        const p = { 'weather_section': -3, 'energy_section': -2, 'cameras_section': -1, 'scenes_section': 0, 'favorites_section': 1 };
+        const p: Record<string, number> = { 'weather_section': -3, 'energy_section': -2, 'cameras_section': -1, 'scenes_section': 0, 'favorites_section': 1 };
         return (p[a] ?? 10) - (p[b] ?? 10) || a.localeCompare(b);
       });
     }

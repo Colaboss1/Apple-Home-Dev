@@ -5,8 +5,10 @@ export class EditModeManager {
   constructor(onEditModeChange: (editMode: boolean) => void) { this.onEditModeChange = onEditModeChange; }
 
   get editMode(): boolean { return this._editMode; }
+  isEditMode(): boolean { return this._editMode; }
 
   toggleEditMode() { this._editMode = !this._editMode; this.onEditModeChange(this._editMode); }
+  setEditMode(mode: boolean) { if (this._editMode !== mode) { this._editMode = mode; this.onEditModeChange(this._editMode); } }
 
   updateEntityWrapperStyles(container: HTMLElement, editMode: boolean) {
     container.querySelectorAll('.entity-card-wrapper').forEach((wrapper) => {

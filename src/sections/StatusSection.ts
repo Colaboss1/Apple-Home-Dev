@@ -74,7 +74,7 @@ export class StatusSection {
     else if (dom === 'sensor' && dc === 'battery' && parseFloat(s.state) < 20) map.get('battery')?.entityIds.push(id);
     else if (dom === 'binary_sensor' && dc === 'door') map.get('doors')?.entityIds.push(id);
     else if (dom === 'binary_sensor' && dc === 'window') map.get('windows')?.entityIds.push(id);
-    else if (dom === 'binary_sensor' && dc === 'opening' && dc !== 'door' && dc !== 'window') map.get('contact')?.entityIds.push(id);
+    else if (dom === 'binary_sensor' && dc === 'opening') map.get('contact')?.entityIds.push(id);
     else if (dom === 'media_player') { if (dc === 'tv' || id.includes('tv')) map.get('tvs')?.entityIds.push(id); else map.get('speakers')?.entityIds.push(id); }
   }
 
@@ -120,7 +120,7 @@ export class StatusSection {
   private calculateContactStatus(ids: string[], h: any): string { const open = ids.filter(id => h.states[id]?.state === 'on').length; if (open === 0) return localize('contact.all_closed'); return open === 1 ? `1 ${localize('covers.open')}` : `${open} ${localize('covers.open')}`; }
   private calculateMediaStatus(ids: string[], h: any): string { const pl = ids.filter(id => h.states[id]?.state === 'playing').length; if (pl > 0) return pl === 1 ? localize('media.playing') : `${pl} ${localize('media.multiple_playing')}`; const on = ids.filter(id => h.states[id]?.state && !['off', 'unavailable', 'standby'].includes(h.states[id].state)).length; if (on === 0) return localize('lights.all_off'); return on === ids.length ? (on === 1 ? localize('lights.on') : localize('lights.all_on')) : `${on} ${localize('lights.on')}`; }
   private handleStatusChipClick(i: StatusData, aid?: string): void { if (i.entityIds.length === 1) this.openMoreInfoDialog(i.entityIds[0]); else this.openStatusModal(i, aid); }
-  private openMoreInfoDialog(id: string): void { if (this._hass) { const e = new CustomEvent('hass-more-info', { detail: { entityId: id }, bubbles: true, composed: true }); [document.querySelector('ha-app'), document.querySelector('home-assistant'), document.querySelector('hui-root'), document.querySelector('ha-panel-lovelace')].forEach(t => t?.dispatchEvent(e)) || document.body.dispatchEvent(e); } }
+  private openMoreInfoDialog(id: string): void { if (this._hass) { const e = new CustomEvent('hass-more-info', { detail: { entityId: id }, bubbles: true, composed: true }); const targets = [document.querySelector('ha-app'), document.querySelector('home-assistant'), document.querySelector('hui-root'), document.querySelector('ha-panel-lovelace')].filter(Boolean); if (targets.length > 0) { targets.forEach(t => t?.dispatchEvent(e)); } else { document.body.dispatchEvent(e); } } }
 
   private async groupEntitiesByArea(ids: string[]): Promise<{ [aid: string]: string[] }> {
     const res: { [aid: string]: string[] } = {}; let as: Area[] = [], ds: any[] = [], es: Entity[] = [];
@@ -146,7 +146,7 @@ export class StatusSection {
     cnt.appendChild(hdr); cnt.appendChild(body); modal.appendChild(cnt);
     const close = () => { modal.classList.remove('show'); setTimeout(() => modal.remove(), 300); };
     hdr.querySelector('.modal-close')?.addEventListener('click', close); modal.addEventListener('click', (e) => { if (e.target === modal) close(); });
-    modal.addEventListener('hass-more-info', (e: Event) => { e.stopPropagation(); const ev = e as CustomEvent; close(); setTimeout(() => { [document.querySelector('ha-app'), document.querySelector('home-assistant'), document.querySelector('hui-root'), document.querySelector('ha-panel-lovelace')].forEach(t => t?.dispatchEvent(new CustomEvent('hass-more-info', { detail: ev.detail, bubbles: true, composed: true }))) || document.body.dispatchEvent(new CustomEvent('hass-more-info', { detail: ev.detail, bubbles: true, composed: true })); }, 100); });
+    modal.addEventListener('hass-more-info', (e: Event) => { e.stopPropagation(); const ev = e as CustomEvent; close(); setTimeout(() => { const targets = [document.querySelector('ha-app'), document.querySelector('home-assistant'), document.querySelector('hui-root'), document.querySelector('ha-panel-lovelace')].filter(Boolean); if (targets.length > 0) { targets.forEach(t => t?.dispatchEvent(new CustomEvent('hass-more-info', { detail: ev.detail, bubbles: true, composed: true }))); } else { document.body.dispatchEvent(new CustomEvent('hass-more-info', { detail: ev.detail, bubbles: true, composed: true })); } }, 100); });
     document.body.appendChild(modal); this.addModalStyles(); requestAnimationFrame(() => modal.classList.add('show'));
   }
 

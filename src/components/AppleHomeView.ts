@@ -205,7 +205,7 @@ export class AppleHomeView extends HTMLElement {
       this.updateChips();
       await this.homePage.render(this.content, this._hass, headerConfig.title, (eid, aid) => this.toggleTall(eid, aid));
     } else {
-      if (this.chipsElement) { this.chipsElement.destroy(); this.chipsElement = undefined; this.shadowRoot!.querySelector('.permanent-chips')!.innerHTML = ''; }
+      if (this.chipsElement) { this.chipsElement.clearContainer(); this.chipsElement = undefined; this.shadowRoot!.querySelector('.permanent-chips')!.innerHTML = ''; }
       if (this._activePage === 'group') await this.groupPage.render(this.content, this.config.deviceGroup, this._hass, (eid, aid) => this.toggleTall(eid, aid));
       else if (this._activePage === 'room') await this.roomPage.render(this.content, this.config.areaId, this.config.areaName, this._hass, (eid, aid) => this.toggleTall(eid, aid));
       else if (this._activePage === 'scenes') await this.scenesPage.render(this.content, this._hass, (eid, aid) => this.toggleTall(eid, aid));
@@ -239,14 +239,14 @@ export class AppleHomeView extends HTMLElement {
     const container = this.shadowRoot!.querySelector('.permanent-chips') as HTMLElement;
     if (!this.chipsElement) {
       this.chipsElement = new AppleChips(container, this.customizationManager);
-      this.chipsElement.onGroupChange = (g) => this.onChipsGroupChange(g);
+      this.chipsElement = new AppleChips(container, this.customizationManager);
     }
   }
 
   private async updateChips() {
     if (!this.chipsElement || !this._hass) return;
-    const config = await ChipsConfigurationManager.generateConfig(this._hass, this.customizationManager);
-    this.chipsElement.setConfig(config);
+    const config = ChipsConfigurationManager.getSettingsFromConfig();
+    this.chipsElement.setConfig(config.chips_config);
     this.chipsElement.hass = this._hass;
     this.appleHeader.setChipsElement(this.chipsElement);
   }
@@ -273,7 +273,7 @@ export class AppleHomeView extends HTMLElement {
       if (this._activePage === 'scenes') this.scenesPage.updateDragAndDrop(true, this.content!);
       else if (this._activePage === 'cameras') this.camerasPage.updateDragAndDrop(true, this.content!);
     } else {
-      this.dragAndDropManager.disableDragAndDrop(this.content!);
+      this.dragAndDropManager.destroy();
       if (this._activePage === 'scenes') this.scenesPage.updateDragAndDrop(false, this.content!);
       else if (this._activePage === 'cameras') this.camerasPage.updateDragAndDrop(false, this.content!);
       this.customizationManager.saveLayoutToStorage(this._hass);
