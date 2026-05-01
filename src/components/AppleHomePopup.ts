@@ -9,6 +9,8 @@ export class AppleHomePopup extends HTMLElement {
   private maxValue: number = 100;
   private isDragging: boolean = false;
   private updateTimeout: any;
+  private activeTimeout: any;
+  private lastThrottledValue: number = -1;
 
   constructor() { super(); this.attachShadow({ mode: 'open' }); }
 
@@ -51,8 +53,16 @@ export class AppleHomePopup extends HTMLElement {
   private setupListeners() {
     const s = this.shadowRoot!.getElementById('slider'), t = this.shadowRoot!.getElementById('track'), st = this.shadowRoot!.getElementById('state-text'), tb = this.shadowRoot!.getElementById('toggle-btn'), sb = this.shadowRoot!.getElementById('settings-btn'), b = this.shadowRoot!.getElementById('backdrop'), i = this.shadowRoot!.querySelector('.slider-icon') as HTMLElement, cc = this.shadowRoot!.querySelectorAll('.color-circle');
     if (!s || !t) return;
-    const upd = (clientY: number) => { const r = s.getBoundingClientRect(); let p = Math.max(0, Math.min(100, ((r.bottom - clientY) / r.height) * 100)); t.style.height = `${p}%`; if (i) i.style.color = p > 10 ? '#000' : '#fff'; if (this.domain === 'climate' || this.domain === 'water_heater') { this.sliderValue = Math.round((this.minValue + ((p / 100) * (this.maxValue - this.minValue))) * 10) / 10; if (st) st.textContent = `${this.sliderValue}°`; } else { this.sliderValue = Math.round(p); if (st) st.textContent = `${this.sliderValue}%`; } };
-    const commit = () => { this.isDragging = false; t.style.transition = 'height 0.3s cubic-bezier(0.2, 0.8, 0.2, 1)'; if (this.updateTimeout) clearTimeout(this.updateTimeout); this.updateTimeout = setTimeout(() => { if (this.domain === 'light') { if (this.sliderValue === 0) this._hass.callService('light', 'turn_off', { entity_id: this.entityId }); else this._hass.callService('light', 'turn_on', { entity_id: this.entityId, brightness_pct: this.sliderValue }); } else if (this.domain === 'cover') this._hass.callService('cover', 'set_cover_position', { entity_id: this.entityId, position: this.sliderValue }); else if (this.domain === 'climate' || this.domain === 'water_heater') this._hass.callService(this.domain, 'set_temperature', { entity_id: this.entityId, temperature: this.sliderValue }); else if (this.domain === 'media_player') this._hass.callService('media_player', 'volume_set', { entity_id: this.entityId, volume_level: this.sliderValue / 100 }); }, 50); };
+    const throttledCallService = () => {
+      if (this.sliderValue === this.lastThrottledValue) return;
+      this.lastThrottledValue = this.sliderValue;
+      if (this.domain === 'light') { if (this.sliderValue === 0) this._hass.callService('light', 'turn_off', { entity_id: this.entityId }); else this._hass.callService('light', 'turn_on', { entity_id: this.entityId, brightness_pct: this.sliderValue }); }
+      else if (this.domain === 'cover') this._hass.callService('cover', 'set_cover_position', { entity_id: this.entityId, position: this.sliderValue });
+      else if (this.domain === 'climate' || this.domain === 'water_heater') this._hass.callService(this.domain, 'set_temperature', { entity_id: this.entityId, temperature: this.sliderValue });
+      else if (this.domain === 'media_player') this._hass.callService('media_player', 'volume_set', { entity_id: this.entityId, volume_level: this.sliderValue / 100 });
+    };
+    const upd = (clientY: number) => { const r = s.getBoundingClientRect(); let p = Math.max(0, Math.min(100, ((r.bottom - clientY) / r.height) * 100)); t.style.height = `${p}%`; if (i) i.style.color = p > 10 ? '#000' : '#fff'; if (this.domain === 'climate' || this.domain === 'water_heater') { this.sliderValue = Math.round((this.minValue + ((p / 100) * (this.maxValue - this.minValue))) * 10) / 10; if (st) st.textContent = `${this.sliderValue}°`; } else { this.sliderValue = Math.round(p); if (st) st.textContent = `${this.sliderValue}%`; } if (!this.activeTimeout) { this.activeTimeout = setTimeout(() => { throttledCallService(); this.activeTimeout = null; }, 150); } };
+    const commit = () => { this.isDragging = false; t.style.transition = 'height 0.3s cubic-bezier(0.2, 0.8, 0.2, 1)'; if (this.updateTimeout) clearTimeout(this.updateTimeout); if (this.activeTimeout) { clearTimeout(this.activeTimeout); this.activeTimeout = null; } this.updateTimeout = setTimeout(() => throttledCallService(), 50); };
     b?.addEventListener('click', (e) => { e.stopPropagation(); this.remove(); }, { capture: true }); this.addEventListener('click', (e) => { if (e.target === this) { e.stopPropagation(); this.remove(); } }); this.shadowRoot!.querySelector('.popup-container')?.addEventListener('click', (e) => e.stopPropagation());
     const hcs = (e: Event) => { const tg = e.currentTarget as HTMLElement, rgb = tg.getAttribute('data-rgb'), tmp = tg.getAttribute('data-temp'); cc.forEach(c => c.classList.remove('selected')); tg.classList.add('selected'); if (rgb) { const [r, g, b_v] = rgb.split(',').map(Number); this._hass.callService('light', 'turn_on', { entity_id: this.entityId, rgb_color: [r, g, b_v] }); } else if (tmp) this._hass.callService('light', 'turn_on', { entity_id: this.entityId, color_temp: Number(tmp) }); };
     cc.forEach(c => { c.addEventListener('click', hcs); c.addEventListener('touchend', (e) => { e.preventDefault(); hcs(e); }); });
@@ -62,7 +72,7 @@ export class AppleHomePopup extends HTMLElement {
     s.addEventListener('mousedown', (e) => { e.preventDefault(); this.isDragging = true; t.style.transition = 'none'; upd(e.clientY); });
     const mv = (e: MouseEvent) => { if (this.isDragging) { e.preventDefault(); upd(e.clientY); } }, up = () => { if (this.isDragging) commit(); };
     document.addEventListener('mousemove', mv); document.addEventListener('mouseup', up);
-    const orig = this.remove; this.remove = () => { document.removeEventListener('mousemove', mv); document.removeEventListener('mouseup', up); orig.call(this); };
+    const orig = this.remove; this.remove = () => { if (this.isDragging) commit(); document.removeEventListener('mousemove', mv); document.removeEventListener('mouseup', up); orig.call(this); };
     tb?.addEventListener('click', () => { this._hass.callService(this.domain, 'toggle', { entity_id: this.entityId }); setTimeout(() => this.remove(), 200); });
     sb?.addEventListener('click', () => { this.remove(); this.dispatchEvent(new CustomEvent('hass-more-info', { bubbles: true, composed: true, detail: { entityId: this.entityId } })); });
   }

@@ -74,9 +74,9 @@ export class AppleHomeView extends HTMLElement {
       .carousel-grid .entity-card-wrapper { flex: 0 0 auto; width: 160px; height: 74px; }
       .carousel-grid.cameras .entity-card-wrapper { width: 280px; height: 185px; }
       .area-entities { display: grid; grid-template-columns: repeat(12, 1fr); grid-auto-rows: 74px; gap: var(--card-gap); margin-bottom: 24px; }
-      .entity-card-wrapper { grid-column: span 3; position: relative; will-change: transform; transform: translateZ(0); }
+      .entity-card-wrapper { grid-column: span 3; position: relative; }
       .entity-card-wrapper.tall { grid-row: span 2; }
-      .entity-card-wrapper.edit-mode { animation: jiggle 0.3s ease-in-out infinite alternate; will-change: transform; }
+      .entity-card-wrapper.edit-mode { animation: jiggle 0.3s ease-in-out infinite alternate; }
       @keyframes jiggle { 0% { transform: rotate(-0.8deg); } 100% { transform: rotate(0.8deg); } }
       .entity-controls { position: absolute; top: -8px; right: -8px; display: none; gap: 4px; z-index: 10; }
       .edit-mode .entity-controls { display: flex; }
@@ -121,7 +121,7 @@ export class AppleHomeView extends HTMLElement {
     this.addEventListener('apple-home-hide-entity', (e: any) => this.handleHideEntity(e.detail.entityId, e.detail.areaId));
     window.addEventListener('location-changed', () => this.handleLocationChange());
     window.addEventListener('popstate', () => this.handleLocationChange());
-    document.addEventListener('apple-sidebar-toggled', (e: any) => {
+    window.addEventListener('apple-sidebar-toggled', (e: any) => {
       if (e.detail?.toggle) this.isSidebarCollapsed = !this.isSidebarCollapsed;
       else if (e.detail?.open !== undefined) this.isSidebarCollapsed = !e.detail.open;
       this.updateSidebarState();
@@ -215,6 +215,10 @@ export class AppleHomeView extends HTMLElement {
     if (isIpad && !this.sidebarElement) {
       const container = this.shadowRoot!.querySelector('.sidebar-container') as HTMLElement;
       this.sidebarElement = new AppleSidebar(container);
+      this.sidebarElement.setOnClose(() => {
+        this.isSidebarCollapsed = true;
+        this.updateSidebarState();
+      });
       this.sidebarElement.hass = this._hass;
     }
     
@@ -225,6 +229,10 @@ export class AppleHomeView extends HTMLElement {
     }
 
     this._rendered = true; this._isTransitioning = false;
+    
+    if (this.editModeManager.isEditMode()) {
+      this.handleEditModeChange(true);
+    }
   }
 
   private async ensureChipsExist() {
